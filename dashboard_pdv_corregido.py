@@ -156,41 +156,104 @@ def generar_grafico_telegram(df_v, mv, md, nombre_rep, m_sel):
     return fig
 
 
-def generar_imagen_telegram_optimizada(fig):
-    """Método optimizado específicamente para Telegram con múltiples fallbacks"""
+def generar_imagen_matplotlib(df_v, mv, md, nombre_rep, m_sel):
+    """Genera gráfico usando matplotlib que es más compatible con Streamlit Cloud"""
     try:
-        # Método 1: PNG estándar con configuración optimizada
-        img_bytes = pio.to_image(fig, 
-                                format="png", 
-                                width=1200, 
-                                height=800,
-                                scale=1,
-                                engine="kaleido")
-        return io.BytesIO(img_bytes)
-    except:
-        try:
-            # Método 2: JPEG más liviano
-            img_bytes = pio.to_image(fig, 
-                                   format="jpeg", 
-                                   width=1000, 
-                                   height=600,
-                                   scale=1)
-            return io.BytesIO(img_bytes)
-        except:
-            try:
-                # Método 3: SVG convertido
-                import cairosvg
-                svg_bytes = pio.to_image(fig, format="svg")
-                png_bytes = cairosvg.svg2png(bytestring=svg_bytes)
-                return io.BytesIO(png_bytes)
-            except:
-                try:
-                    # Método 4: HTML estático capturado
-                    html_str = pio.to_html(fig, include_plotlyjs='inline', config={'displayModeBar': False})
-                    # Este método requiere selenium, pero es un último recurso
-                    return None
-                except:
-                    return None
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import io
+        
+        venta_real = df_v['Total'].sum()
+        impactos = df_v[df_v['Total'] > 0]['Cliente'].nunique()
+        pct_v = round(venta_real / mv * 100, 1) if mv > 0 else 0
+        pct_dn = round(impactos / md * 100, 1) if md > 0 else 0
+        
+        # Configurar matplotlib para mejor apariencia
+        plt.style.use('dark_background')
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'📊 {nombre_rep} - {m_sel}', fontsize=16, color='white')
+        
+        # Gráfico 1: Venta vs Meta (Barras)
+        ax1.bar(['Venta Real', 'Meta'], [venta_real, mv], 
+                color=['#4CAF50' if pct_v >= 100 else '#FF9800' if pct_v >= 80 else '#F44336', '#2196F3'])
+        ax1.set_title(f'💰 Ventas: ${venta_real:,.0f} ({pct_v}%)', color='white')
+        ax1.set_ylabel('Valor ($)', color='white')
+        
+        # Gráfico 2: Cobertura DN
+        ax2.bar(['DN Real', 'Meta DN'], [impactos, md],
+                color=['#4CAF50' if pct_dn >= 100 else '#FF9800' if pct_dn >= 80 else '#F44336', '#2196F3'])
+        ax2.set_title(f'👥 Cobertura: {impactos}/{int(md)} ({pct_dn}%)', color='white')
+        ax2.set_ylabel('Clientes', color='white')
+        
+        # Gráfico 3: Top Marcas
+        if not df_v.empty and 'Marca' in df_v.columns:
+            marcas = df_v.groupby('Marca')['Total'].sum().nlargest(4)
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
+            ax3.pie(marcas.values, labels=marcas.index, autopct='%1.1f%%', colors=colors)
+            ax3.set_title('🏆 Top Marcas', color='white')
+        
+        # Gráfico 4: Métricas clave
+        metricas = ['Venta %', 'DN %', 'Proyección']
+        proy = calcular_proyeccion(venta_real, df_v['Fecha'].max()) if not df_v.empty else 0
+        proy_pct = round(proy / mv * 100, 1) if mv > 0 else 0
+        valores = [pct_v, pct_dn, proy_pct]
+        
+        bars = ax4.bar(metricas, valores, color=['#4CAF50', '#2196F3', '#FF9800'])
+        ax4.set_title('📈 Resumen Performance', color='white')
+        ax4.set_ylabel('Porcentaje (%)', color='white')
+        ax4.axhline(y=100, color='red', linestyle='--', alpha=0.7)
+        
+        # Añadir valores en las barras
+        for bar, valor in zip(bars, valores):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height + 1,
+                    f'{valor:.1f}%', ha='center', va='bottom', color='white')
+        
+        plt.tight_layout()
+        
+        # Convertir a bytes
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', 
+                   facecolor='#1e1e1e', edgecolor='none')
+        img_buffer.seek(0)
+        plt.close()
+        
+        return img_buffer
+        
+    except Exception as e:
+        print(f"Error generando matplotlib: {e}")
+        return None
+
+
+def enviar_telegram_con_imagen_alternativa(df_v, mv, md, nombre_rep, m_sel, mensaje, chat_id):
+    """Intenta múltiples métodos para enviar imagen por Telegram"""
+    
+    # Método 1: Matplotlib (más compatible)
+    try:
+        img_buffer = generar_imagen_matplotlib(df_v, mv, md, nombre_rep, m_sel)
+        if img_buffer:
+            img_buffer.seek(0)
+            if enviar_telegram(mensaje, chat_id, img_buffer):
+                return True, "MATPLOTLIB"
+    except Exception as e:
+        print(f"Matplotlib falló: {e}")
+    
+    # Método 2: Plotly optimizado
+    try:
+        fig_telegram = generar_grafico_telegram(df_v, mv, md, nombre_rep, m_sel)
+        img_buffer = generar_imagen_telegram_optimizada(fig_telegram)
+        if img_buffer:
+            img_buffer.seek(0)
+            if enviar_telegram(mensaje, chat_id, img_buffer):
+                return True, "PLOTLY"
+    except Exception as e:
+        print(f"Plotly falló: {e}")
+    
+    # Método 3: Solo texto
+    if enviar_telegram(mensaje, chat_id):
+        return True, "TEXTO"
+    
+    return False, "ERROR"
 
 
 def generar_reporte_telegram(df_final, mv, md, nombre_rep, m_sel, venta_real, impactos, proy):
@@ -1095,38 +1158,29 @@ def dashboard(df_v_all, df_p, usuario_row):
                         chat_id = TELEGRAM_CONFIG['CHAT_IDS'][chat_destino]
                         
                         with st.spinner("📱 Generando reporte completo..."):
-                            # 1. Generar reporte de texto completo
+                            # Generar reporte de texto completo
                             mensaje = generar_reporte_telegram(
                                 df_final, mv, md, nombre_rep, m_sel, 
                                 venta_real, impactos, proy
                             )
                             
-                            # 2. Intentar generar gráfico optimizado para Telegram
-                            try:
-                                fig_telegram = generar_grafico_telegram(df_final, mv, md, nombre_rep, m_sel)
-                                img_buffer = generar_imagen_telegram_optimizada(fig_telegram)
-                                
-                                if img_buffer:
-                                    img_buffer.seek(0)
-                                    if enviar_telegram(mensaje, chat_id, img_buffer):
-                                        st.success(f"✅ Enviado COMPLETO (texto + gráfico) a Telegram")
-                                        st.info("📊 Incluye: Reporte ejecutivo + Gráficos de performance")
-                                    else:
-                                        st.error("❌ Error enviando a Telegram")
-                                else:
-                                    # Solo texto completo
-                                    if enviar_telegram(mensaje, chat_id):
-                                        st.success(f"✅ Enviado reporte ejecutivo completo (solo texto)")
-                                        st.info("📝 Reporte súper detallado enviado exitosamente")
-                                    else:
-                                        st.error("❌ Error enviando a Telegram")
-                            except Exception as e:
-                                # Solo texto completo
-                                if enviar_telegram(mensaje, chat_id):
-                                    st.success(f"✅ Enviado reporte ejecutivo completo (solo texto)")  
+                            # Intentar envío con imagen usando método alternativo
+                            exito, metodo = enviar_telegram_con_imagen_alternativa(
+                                df_final, mv, md, nombre_rep, m_sel, mensaje, chat_id
+                            )
+                            
+                            if exito:
+                                if metodo == "MATPLOTLIB":
+                                    st.success("✅ Enviado COMPLETO con gráfico (matplotlib)")
+                                    st.info("📊 Incluye: Reporte ejecutivo + Gráficos optimizados")
+                                elif metodo == "PLOTLY":
+                                    st.success("✅ Enviado COMPLETO con gráfico (plotly)")
+                                    st.info("📊 Incluye: Reporte ejecutivo + Gráficos plotly")
+                                elif metodo == "TEXTO":
+                                    st.success("✅ Enviado reporte ejecutivo completo (solo texto)")
                                     st.info("📝 Reporte súper detallado enviado exitosamente")
-                                else:
-                                    st.error("❌ Error enviando a Telegram")
+                            else:
+                                st.error("❌ Error enviando a Telegram")
                     else:
                         st.warning("⚠️ Activa Telegram en los controles superiores")
 
@@ -1290,35 +1344,22 @@ def dashboard(df_v_all, df_p, usuario_row):
                                     dv, mv_i, md_i, v, m_sel, venta_real, impactos, proy
                                 )
                                 
-                                # Generar gráfico optimizado para Telegram
-                                try:
-                                    fig_telegram = generar_grafico_telegram(dv, mv_i, md_i, v, m_sel)
-                                    img_buffer = generar_imagen_telegram_optimizada(fig_telegram)
-                                    
-                                    if img_buffer:
-                                        img_buffer.seek(0)
-                                        if enviar_telegram(mensaje_individual, chat_id, img_buffer):
-                                            enviados += 1
-                                            st.success(f"✅ {v} (COMPLETO: texto + gráfico)")
-                                        else:
-                                            errores += 1
-                                            st.error(f"❌ {v}")
-                                    else:
-                                        # Solo texto completo
-                                        if enviar_telegram(mensaje_individual, chat_id):
-                                            enviados += 1
-                                            st.success(f"✅ {v} (reporte ejecutivo completo)")
-                                        else:
-                                            errores += 1
-                                            st.error(f"❌ {v}")
-                                except:
-                                    # Solo texto completo
-                                    if enviar_telegram(mensaje_individual, chat_id):
-                                        enviados += 1
+                                # Intentar envío con imagen usando método alternativo
+                                exito, metodo = enviar_telegram_con_imagen_alternativa(
+                                    dv, mv_i, md_i, v, m_sel, mensaje_individual, chat_id
+                                )
+                                
+                                if exito:
+                                    enviados += 1
+                                    if metodo == "MATPLOTLIB":
+                                        st.success(f"✅ {v} (COMPLETO: texto + matplotlib)")
+                                    elif metodo == "PLOTLY":
+                                        st.success(f"✅ {v} (COMPLETO: texto + plotly)")
+                                    elif metodo == "TEXTO":
                                         st.success(f"✅ {v} (reporte ejecutivo completo)")
-                                    else:
-                                        errores += 1
-                                        st.error(f"❌ {v}")
+                                else:
+                                    errores += 1
+                                    st.error(f"❌ {v}")
                                     
                             except Exception as e:
                                 errores += 1
