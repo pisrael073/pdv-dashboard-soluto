@@ -107,42 +107,86 @@ def generar_imagen_inteligente(fig):
 
 
 def generar_reporte_telegram(df_final, mv, md, nombre_rep, m_sel, venta_real, impactos, proy):
-    """Genera reporte de texto para Telegram"""
+    """Genera reporte ejecutivo completo para Telegram (solo texto)"""
     pct_v = round(venta_real / mv * 100, 1) if mv > 0 else 0
     pct_dn = round(impactos / md * 100, 1) if md > 0 else 0
     
     # Emojis de estado
-    emoji_meta = "✅" if pct_v >= 100 else "⚠️" if pct_v >= 80 else "❌"
-    emoji_dn = "✅" if pct_dn >= 100 else "⚠️" if pct_dn >= 80 else "❌"
+    emoji_meta = "🟢" if pct_v >= 100 else "🟡" if pct_v >= 80 else "🔴"
+    emoji_dn = "🟢" if pct_dn >= 100 else "🟡" if pct_dn >= 80 else "🔴"
     emoji_proy = "📈" if proy >= mv else "📉"
     
+    # Top marcas
+    top_marcas_text = ""
+    if not df_final.empty and 'Marca' in df_final.columns:
+        top_marcas = df_final.groupby('Marca')['Total'].sum().nlargest(5)
+        for i, (marca, venta) in enumerate(top_marcas.items(), 1):
+            pct_marca = round(venta / venta_real * 100, 1) if venta_real > 0 else 0
+            top_marcas_text += f"\n{i}. <b>{marca}</b>: ${venta:,.0f} ({pct_marca}%)"
+    
+    # Top clientes
+    top_clientes_text = ""
+    if not df_final.empty and 'Cliente' in df_final.columns:
+        top_clientes = df_final.groupby('Cliente')['Total'].sum().nlargest(3)
+        for i, (cliente, venta) in enumerate(top_clientes.items(), 1):
+            cliente_short = cliente[:25] + "..." if len(cliente) > 25 else cliente
+            top_clientes_text += f"\n{i}. <b>{cliente_short}</b>: ${venta:,.0f}"
+    
+    # Días transcurridos del mes
+    fecha_actual = datetime.now()
+    dia_actual = fecha_actual.day
+    dias_mes = calendar.monthrange(fecha_actual.year, fecha_actual.month)[1]
+    pct_mes = round(dia_actual / dias_mes * 100, 1)
+    
     mensaje = f"""
-📊 <b>REPORTE PDV - {nombre_rep}</b>
+📊 <b>REPORTE EJECUTIVO PDV</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 <b>{nombre_rep}</b>
 📅 <b>Período:</b> {m_sel}
 🕐 <b>Generado:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
-💰 <b>VENTAS NETAS</b>
-├ Venta Real: <b>${venta_real:,.0f}</b>
-├ Meta: <b>${mv:,.0f}</b>
-└ Avance: <b>{pct_v}%</b> {emoji_meta}
+💰 <b>PERFORMANCE VENTAS</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━
+├ 💵 Venta Neta: <b>${venta_real:,.0f}</b>
+├ 🎯 Meta Mes: <b>${mv:,.0f}</b>
+├ 📊 Avance: <b>{pct_v}%</b> {emoji_meta}
+└ 📈 Ritmo: <b>${venta_real/dia_actual:,.0f}/día</b>
 
 👥 <b>COBERTURA DN</b>
-├ Clientes Impactados: <b>{impactos}</b>
-├ Meta DN: <b>{int(md)}</b>
-└ Cobertura: <b>{pct_dn}%</b> {emoji_dn}
+━━━━━━━━━━━━━━━━━━━━━━━━━
+├ 🏪 Clientes Impactados: <b>{impactos}</b>
+├ 🎯 Meta DN: <b>{int(md)}</b>
+├ 📊 Cobertura: <b>{pct_dn}%</b> {emoji_dn}
+└ 📍 Promedio: <b>${venta_real/impactos if impactos > 0 else 0:,.0f}/cliente</b>
 
 {emoji_proy} <b>PROYECCIÓN CIERRE</b>
-└ Estimado: <b>${proy:,.0f}</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━
+├ 📈 Estimado Mes: <b>${proy:,.0f}</b>
+├ 📅 Días transcurridos: <b>{dia_actual}/{dias_mes} ({pct_mes}%)</b>
+├ 🚀 Para meta faltan: <b>${max(0, mv-venta_real):,.0f}</b>
+└ 📊 Ritmo requerido: <b>${max(0, mv-venta_real)/(dias_mes-dia_actual) if (dias_mes-dia_actual) > 0 else 0:,.0f}/día</b>
 
-🎯 <b>TOP 3 MARCAS</b>"""
-    
-    # Agregar top marcas
-    if not df_final.empty:
-        top_marcas = df_final.groupby('Marca')['Total'].sum().nlargest(3)
-        for i, (marca, venta) in enumerate(top_marcas.items(), 1):
-            mensaje += f"\n{i}. {marca}: ${venta:,.0f}"
-    
-    mensaje += f"\n\n💎 <i>Sistema SOLUTO - PDV Sin Límites</i>"
+🏆 <b>TOP 5 MARCAS</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━{top_marcas_text}
+
+👑 <b>TOP 3 CLIENTES</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━{top_clientes_text}
+
+📋 <b>RESUMEN EJECUTIVO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+    # Status del vendedor
+    if pct_v >= 100:
+        mensaje += f"\n✅ <b>EXCELENTE</b>: Meta superada"
+    elif pct_v >= 90:
+        mensaje += f"\n🟡 <b>EN RUTA</b>: Muy cerca de meta"
+    elif pct_v >= 80:
+        mensaje += f"\n🟠 <b>ATENCIÓN</b>: Requiere aceleración"
+    else:
+        mensaje += f"\n🔴 <b>CRÍTICO</b>: Urgente intervención"
+
+    mensaje += f"\n\n💎 <i>Sistema PDV Sin Límites</i>"
+    mensaje += f"\n🤖 <i>Reporte automático #{datetime.now().strftime('%Y%m%d%H%M')}</i>"
     
     return mensaje
 
@@ -1101,18 +1145,27 @@ def dashboard(df_v_all, df_p, usuario_row):
                     
                     mensaje_inicial = f"""
 🚀 <b>ENVÍO MASIVO DE REPORTES INICIADO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 👤 <b>Solicitado por:</b> {user_nombre}
 📅 <b>Período:</b> {m_sel}
 📊 <b>Total vendedores:</b> {len(vends_all)}
+🕐 <b>Hora inicio:</b> {datetime.now().strftime('%H:%M:%S')}
 
-💰 <b>RESUMEN CONSOLIDADO:</b>
-├ Venta Total: <b>${total_venta:,.0f}</b>
-├ Meta Total: <b>${total_meta:,.0f}</b>
-├ Cumplimiento Global: <b>{pct_total}%</b>
-└ Clientes DN Total: <b>{df_mes[df_mes['Total'] > 0]['Cliente'].nunique()}</b>
+💰 <b>RESUMEN CONSOLIDADO GENERAL</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+├ 💵 Venta Total: <b>${total_venta:,.0f}</b>
+├ 🎯 Meta Total: <b>${total_meta:,.0f}</b>
+├ 📊 Cumplimiento Global: <b>{pct_total}%</b>
+├ 👥 Clientes DN Total: <b>{df_mes[df_mes['Total'] > 0]['Cliente'].nunique()}</b>
+└ 🏪 Vendedores Activos: <b>{len(vends_all)}</b>
 
-⏳ <b>Enviando reportes individuales...</b>
-💎 <i>Sistema PDV Sin Límites</i>
+⏳ <b>ENVIANDO REPORTES INDIVIDUALES...</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📱 Cada vendedor recibirá un reporte ejecutivo completo
+📊 Incluye: Ventas, Metas, Proyecciones, Top Marcas y Clientes
+🎯 Formato: Texto optimizado (imágenes si están disponibles)
+
+💎 <i>Sistema PDV Sin Límites - Automatización Israel</i>
 """
                     enviar_telegram(mensaje_inicial, chat_id)
                     
@@ -1171,17 +1224,25 @@ def dashboard(df_v_all, df_p, usuario_row):
                     # Mensaje final
                     mensaje_final = f"""
 ✅ <b>ENVÍO MASIVO COMPLETADO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📊 <b>ESTADÍSTICAS DEL ENVÍO:</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ├ ✅ Reportes enviados: <b>{enviados}</b>
 ├ ❌ Errores: <b>{errores}</b>
 ├ 📊 Total procesados: <b>{len(vends_all)}</b>
+├ 📈 Tasa éxito: <b>{round(enviados/len(vends_all)*100,1) if len(vends_all) > 0 else 0}%</b>
 └ 📅 Período: <b>{m_sel}</b>
 
-⏰ <b>Completado:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
-👤 <b>Enviado por:</b> {user_nombre}
+⏰ <b>TIMING:</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+├ 🕐 Completado: <b>{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</b>
+└ 👤 Enviado por: <b>{user_nombre}</b>
 
-💎 <i>Sistema PDV Sin Límites</i>
+📋 <b>RESUMEN:</b> Cada vendedor recibió un reporte ejecutivo completo con métricas, proyecciones y análisis personalizado.
+
+💎 <i>Sistema PDV Sin Límites - Automatización Exitosa</i>
+🎯 <b>Misión cumplida: {enviados} equipos informados</b>
 """
                     enviar_telegram(mensaje_final, chat_id)
                     
