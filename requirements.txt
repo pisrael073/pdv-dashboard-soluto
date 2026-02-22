@@ -7,3 +7,4 @@ requests>=2.25.0
 openpyxl>=3.0.0
 kaleido
 psutil
+cairosvg
