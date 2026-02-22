@@ -263,19 +263,30 @@ def get_gc():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # 🔧 USAR SECRETS EN STREAMLIT CLOUD
+    # 🔧 DEBUG: Ver qué secrets están disponibles
     try:
-        # En Streamlit Cloud (usando secrets)
-        import json
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        available_secrets = list(st.secrets.keys())
+        st.info(f"🔍 DEBUG: Secrets disponibles: {available_secrets}")
+        
+        if "google" in st.secrets:
+            st.success("✅ google encontrado en secrets")
+            creds_dict = dict(st.secrets["google"])
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            st.success("✅ Credenciales cargadas exitosamente desde secrets")
+        else:
+            st.error("❌ google NO encontrado en secrets")
+            raise Exception("Secrets no configurados correctamente")
+            
     except Exception as e:
+        st.error(f"❌ Error con secrets: {e}")
+        st.info("🔧 Intentando archivo local como fallback...")
         try:
             # Fallback local (usando archivo)
             creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+            st.warning("⚠️ Usando archivo local (no recomendado en producción)")
         except Exception as e2:
-            st.error(f"❌ Error de credenciales: {e2}")
-            st.info("💡 Configura los secrets en Streamlit Cloud o coloca credenciales.json localmente")
+            st.error(f"❌ Error final: {e2}")
+            st.error("💡 Configura los secrets correctamente en Streamlit Cloud")
             st.stop()
     
     return gspread.authorize(creds)
