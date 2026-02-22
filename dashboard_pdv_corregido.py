@@ -267,7 +267,7 @@ def get_gc():
     try:
         # En Streamlit Cloud (usando secrets)
         import json
-        creds_dict = dict(st.secrets["google"])
+        creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     except Exception as e:
         try:
@@ -907,37 +907,57 @@ def dashboard(df_v_all, df_p, usuario_row):
             col_png, col_telegram = st.columns(2)
             
             with col_png:
-                img = pio.to_image(fig, format="png", scale=2.0)
-                st.download_button(
-                    f"📥 Descargar PNG — {nombre_rep}", img,
-                    f"Scorecard_{nombre_rep.replace(' ', '_')}_{m_sel}.png",
-                    "image/png", use_container_width=True
-                )
+                # 🔧 FIX: Usar try-catch para PNG, fallback a HTML
+                try:
+                    img = pio.to_image(fig, format="png", scale=2.0)
+                    st.download_button(
+                        f"📥 Descargar PNG — {nombre_rep}", img,
+                        f"Scorecard_{nombre_rep.replace(' ', '_')}_{m_sel}.png",
+                        "image/png", use_container_width=True
+                    )
+                except Exception as e:
+                    # Fallback: Descargar como HTML interactivo
+                    html_string = pio.to_html(fig, include_plotlyjs='cdn')
+                    st.download_button(
+                        f"📥 Descargar HTML — {nombre_rep}", html_string.encode(),
+                        f"Scorecard_{nombre_rep.replace(' ', '_')}_{m_sel}.html",
+                        "text/html", use_container_width=True
+                    )
+                    st.info("💡 PNG no disponible en web, descarga como HTML interactivo")
             
             with col_telegram:
                 if st.button(f"📱 Enviar por Telegram", use_container_width=True, 
                            key="telegram_scorecard"):
                     if telegram_activo and chat_destino:
-                        # Generar reporte
+                        # Generar reporte de texto
                         mensaje = generar_reporte_telegram(
                             df_final, mv, md, nombre_rep, m_sel, 
                             venta_real, impactos, proy
                         )
                         
-                        # Enviar a Telegram
                         chat_id = TELEGRAM_CONFIG['CHAT_IDS'][chat_destino]
                         
                         with st.spinner("📱 Enviando a Telegram..."):
-                            # Enviar imagen del scorecard
-                            img_bytes = io.BytesIO(img)
-                            img_bytes.seek(0)
-                            
-                            if enviar_telegram(mensaje, chat_id, img_bytes):
-                                st.success(f"✅ Enviado a Telegram ({chat_destino})")
-                            else:
-                                st.error("❌ Error enviando a Telegram")
+                            # 🔧 FIX: Solo texto por limitaciones de Streamlit Cloud
+                            try:
+                                # Intentar con imagen
+                                img = pio.to_image(fig, format="png", scale=2.0)
+                                img_bytes = io.BytesIO(img)
+                                img_bytes.seek(0)
+                                
+                                if enviar_telegram(mensaje, chat_id, img_bytes):
+                                    st.success(f"✅ Enviado con imagen a Telegram ({chat_destino})")
+                                else:
+                                    st.error("❌ Error enviando a Telegram")
+                            except:
+                                # Fallback: Solo texto
+                                if enviar_telegram(mensaje, chat_id):
+                                    st.success(f"✅ Enviado (solo texto) a Telegram ({chat_destino})")
+                                    st.info("📝 Imagen no disponible en versión web")
+                                else:
+                                    st.error("❌ Error enviando a Telegram")
                     else:
-                        st.warning("⚠️ Activa Telegram en el sidebar primero")
+                        st.warning("⚠️ Activa Telegram en los controles superiores")
 
     # ── Tab 2: Detalle ────────────────────────────────────────────
     with tab2:
@@ -1080,11 +1100,6 @@ def dashboard(df_v_all, df_p, usuario_row):
                         
                         if not dv.empty:
                             try:
-                                # Generar scorecard
-                                fig = generar_scorecard(dv, mv_i, md_i, v, m_sel)
-                                img_bytes = io.BytesIO(pio.to_image(fig, format="png", scale=2.0))
-                                img_bytes.seek(0)
-                                
                                 # Generar reporte de texto
                                 venta_real = dv['Total'].sum()
                                 impactos = dv[dv['Total'] > 0]['Cliente'].nunique()
@@ -1095,13 +1110,28 @@ def dashboard(df_v_all, df_p, usuario_row):
                                     dv, mv_i, md_i, v, m_sel, venta_real, impactos, proy
                                 )
                                 
-                                # Enviar a Telegram
-                                if enviar_telegram(mensaje_individual, chat_id, img_bytes):
-                                    enviados += 1
-                                    st.success(f"✅ {v}")
-                                else:
-                                    errores += 1
-                                    st.error(f"❌ {v}")
+                                # 🔧 FIX: Intentar con imagen, fallback a solo texto
+                                try:
+                                    # Generar scorecard e imagen
+                                    fig = generar_scorecard(dv, mv_i, md_i, v, m_sel)
+                                    img_bytes = io.BytesIO(pio.to_image(fig, format="png", scale=2.0))
+                                    img_bytes.seek(0)
+                                    
+                                    # Enviar con imagen
+                                    if enviar_telegram(mensaje_individual, chat_id, img_bytes):
+                                        enviados += 1
+                                        st.success(f"✅ {v}")
+                                    else:
+                                        errores += 1
+                                        st.error(f"❌ {v}")
+                                except:
+                                    # Fallback: Solo texto
+                                    if enviar_telegram(mensaje_individual, chat_id):
+                                        enviados += 1
+                                        st.success(f"✅ {v} (solo texto)")
+                                    else:
+                                        errores += 1
+                                        st.error(f"❌ {v}")
                                     
                             except Exception as e:
                                 errores += 1
