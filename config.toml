@@ -1,0 +1,17 @@
+[general]
+email = "israel@soluto.com"
+
+[server]
+headless = true
+enableCORS = false
+port = 8501
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#3B82F6"
+backgroundColor = "#0A0F1E"
+secondaryBackgroundColor = "#111827"
+textColor = "#E2E8F0"
+font = "sans serif"
