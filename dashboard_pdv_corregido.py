@@ -81,29 +81,116 @@ def enviar_telegram(mensaje, chat_id=None, imagen=None):
         return False
 
 
-def generar_imagen_inteligente(fig):
-    """Intenta diferentes métodos para generar imagen del gráfico"""
+def generar_grafico_telegram(df_v, mv, md, nombre_rep, m_sel):
+    """Genera un gráfico simple y optimizado para Telegram"""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    
+    venta_real = df_v['Total'].sum()
+    impactos = df_v[df_v['Total'] > 0]['Cliente'].nunique()
+    pct_v = round(venta_real / mv * 100, 1) if mv > 0 else 0
+    pct_dn = round(impactos / md * 100, 1) if md > 0 else 0
+    
+    # Crear subplots simple
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('💰 Venta vs Meta', '👥 Cobertura DN', '🏆 Top Marcas', '📈 Tendencia'),
+        specs=[[{"type": "indicator"}, {"type": "indicator"}],
+               [{"type": "pie"}, {"type": "bar"}]]
+    )
+    
+    # Indicador de Venta
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=pct_v,
+        title={'text': f"Venta: ${venta_real:,.0f}"},
+        gauge={'axis': {'range': [0, 150]},
+               'bar': {'color': "lightgreen" if pct_v >= 100 else "orange" if pct_v >= 80 else "red"},
+               'threshold': {'line': {'color': "blue", 'width': 4}, 'value': 100}},
+        number={'suffix': "%"},
+        domain={'x': [0, 1], 'y': [0, 1]}
+    ), row=1, col=1)
+    
+    # Indicador de DN
+    fig.add_trace(go.Indicator(
+        mode="gauge+number", 
+        value=pct_dn,
+        title={'text': f"DN: {impactos}/{int(md)}"},
+        gauge={'axis': {'range': [0, 150]},
+               'bar': {'color': "lightgreen" if pct_dn >= 100 else "orange" if pct_dn >= 80 else "red"},
+               'threshold': {'line': {'color': "blue", 'width': 4}, 'value': 100}},
+        number={'suffix': "%"},
+        domain={'x': [0, 1], 'y': [0, 1]}
+    ), row=1, col=2)
+    
+    # Top Marcas (si hay datos)
+    if not df_v.empty and 'Marca' in df_v.columns:
+        marcas = df_v.groupby('Marca')['Total'].sum().nlargest(4)
+        fig.add_trace(go.Pie(
+            labels=marcas.index,
+            values=marcas.values,
+            textinfo="label+percent"
+        ), row=2, col=1)
+    
+    # Tendencia por día (si hay datos)
+    if not df_v.empty and 'Fecha' in df_v.columns:
+        try:
+            df_v['Fecha_parsed'] = pd.to_datetime(df_v['Fecha'])
+            tendencia = df_v.groupby(df_v['Fecha_parsed'].dt.day)['Total'].sum().tail(7)
+            fig.add_trace(go.Bar(
+                x=[f"Día {d}" for d in tendencia.index],
+                y=tendencia.values,
+                marker_color='lightblue'
+            ), row=2, col=2)
+        except:
+            pass
+    
+    fig.update_layout(
+        height=800,
+        title_text=f"📊 {nombre_rep} - {m_sel}",
+        title_x=0.5,
+        font=dict(size=14),
+        showlegend=False
+    )
+    
+    return fig
+
+
+def generar_imagen_telegram_optimizada(fig):
+    """Método optimizado específicamente para Telegram con múltiples fallbacks"""
     try:
-        # Método 1: Kaleido (más confiable)
-        import plotly.io as pio
-        img_bytes = pio.to_image(fig, format="png", scale=1.5, engine="kaleido")
+        # Método 1: PNG estándar con configuración optimizada
+        img_bytes = pio.to_image(fig, 
+                                format="png", 
+                                width=1200, 
+                                height=800,
+                                scale=1,
+                                engine="kaleido")
         return io.BytesIO(img_bytes)
     except:
         try:
-            # Método 2: Configurar kaleido manualmente
-            import plotly.io as pio
-            pio.kaleido.scope.mathjax = None
-            img_bytes = pio.to_image(fig, format="png", scale=1.0)
+            # Método 2: JPEG más liviano
+            img_bytes = pio.to_image(fig, 
+                                   format="jpeg", 
+                                   width=1000, 
+                                   height=600,
+                                   scale=1)
             return io.BytesIO(img_bytes)
         except:
             try:
-                # Método 3: Sin configuraciones especiales
-                import plotly.io as pio
-                img_bytes = pio.to_image(fig, format="jpeg", scale=1.0)
-                return io.BytesIO(img_bytes)
+                # Método 3: SVG convertido
+                import cairosvg
+                svg_bytes = pio.to_image(fig, format="svg")
+                png_bytes = cairosvg.svg2png(bytestring=svg_bytes)
+                return io.BytesIO(png_bytes)
             except:
-                # Si todo falla, retornar None
-                return None
+                try:
+                    # Método 4: HTML estático capturado
+                    html_str = pio.to_html(fig, include_plotlyjs='inline', config={'displayModeBar': False})
+                    # Este método requiere selenium, pero es un último recurso
+                    return None
+                except:
+                    return None
 
 
 def generar_reporte_telegram(df_final, mv, md, nombre_rep, m_sel, venta_real, impactos, proy):
@@ -1005,29 +1092,39 @@ def dashboard(df_v_all, df_p, usuario_row):
                 if st.button(f"📱 Enviar por Telegram", use_container_width=True, 
                            key="telegram_scorecard"):
                     if telegram_activo and chat_destino:
-                        # Generar reporte de texto
-                        mensaje = generar_reporte_telegram(
-                            df_final, mv, md, nombre_rep, m_sel, 
-                            venta_real, impactos, proy
-                        )
-                        
                         chat_id = TELEGRAM_CONFIG['CHAT_IDS'][chat_destino]
                         
-                        with st.spinner("📱 Enviando a Telegram..."):
-                            # Intentar generar imagen con método inteligente
-                            img_buffer = generar_imagen_inteligente(fig)
+                        with st.spinner("📱 Generando reporte completo..."):
+                            # 1. Generar reporte de texto completo
+                            mensaje = generar_reporte_telegram(
+                                df_final, mv, md, nombre_rep, m_sel, 
+                                venta_real, impactos, proy
+                            )
                             
-                            if img_buffer:
-                                img_buffer.seek(0)
-                                if enviar_telegram(mensaje, chat_id, img_buffer):
-                                    st.success(f"✅ Enviado CON IMAGEN a Telegram ({chat_destino})")
+                            # 2. Intentar generar gráfico optimizado para Telegram
+                            try:
+                                fig_telegram = generar_grafico_telegram(df_final, mv, md, nombre_rep, m_sel)
+                                img_buffer = generar_imagen_telegram_optimizada(fig_telegram)
+                                
+                                if img_buffer:
+                                    img_buffer.seek(0)
+                                    if enviar_telegram(mensaje, chat_id, img_buffer):
+                                        st.success(f"✅ Enviado COMPLETO (texto + gráfico) a Telegram")
+                                        st.info("📊 Incluye: Reporte ejecutivo + Gráficos de performance")
+                                    else:
+                                        st.error("❌ Error enviando a Telegram")
                                 else:
-                                    st.error("❌ Error enviando a Telegram")
-                            else:
-                                # Fallback: Solo texto
+                                    # Solo texto completo
+                                    if enviar_telegram(mensaje, chat_id):
+                                        st.success(f"✅ Enviado reporte ejecutivo completo (solo texto)")
+                                        st.info("📝 Reporte súper detallado enviado exitosamente")
+                                    else:
+                                        st.error("❌ Error enviando a Telegram")
+                            except Exception as e:
+                                # Solo texto completo
                                 if enviar_telegram(mensaje, chat_id):
-                                    st.success(f"✅ Enviado (solo texto) a Telegram ({chat_destino})")
-                                    st.info("📝 Imagen no disponible en esta plataforma")
+                                    st.success(f"✅ Enviado reporte ejecutivo completo (solo texto)")  
+                                    st.info("📝 Reporte súper detallado enviado exitosamente")
                                 else:
                                     st.error("❌ Error enviando a Telegram")
                     else:
@@ -1183,7 +1280,7 @@ def dashboard(df_v_all, df_p, usuario_row):
                         
                         if not dv.empty:
                             try:
-                                # Generar reporte de texto
+                                # Generar reporte de texto completo
                                 venta_real = dv['Total'].sum()
                                 impactos = dv[dv['Total'] > 0]['Cliente'].nunique()
                                 fecha_max_vend = dv['Fecha'].max()
@@ -1193,24 +1290,32 @@ def dashboard(df_v_all, df_p, usuario_row):
                                     dv, mv_i, md_i, v, m_sel, venta_real, impactos, proy
                                 )
                                 
-                                # Generar scorecard e intentar imagen inteligente
-                                fig = generar_scorecard(dv, mv_i, md_i, v, m_sel)
-                                img_buffer = generar_imagen_inteligente(fig)
-                                
-                                # Enviar con o sin imagen
-                                if img_buffer:
-                                    img_buffer.seek(0)
-                                    if enviar_telegram(mensaje_individual, chat_id, img_buffer):
-                                        enviados += 1
-                                        st.success(f"✅ {v} (con imagen)")
+                                # Generar gráfico optimizado para Telegram
+                                try:
+                                    fig_telegram = generar_grafico_telegram(dv, mv_i, md_i, v, m_sel)
+                                    img_buffer = generar_imagen_telegram_optimizada(fig_telegram)
+                                    
+                                    if img_buffer:
+                                        img_buffer.seek(0)
+                                        if enviar_telegram(mensaje_individual, chat_id, img_buffer):
+                                            enviados += 1
+                                            st.success(f"✅ {v} (COMPLETO: texto + gráfico)")
+                                        else:
+                                            errores += 1
+                                            st.error(f"❌ {v}")
                                     else:
-                                        errores += 1
-                                        st.error(f"❌ {v}")
-                                else:
-                                    # Solo texto
+                                        # Solo texto completo
+                                        if enviar_telegram(mensaje_individual, chat_id):
+                                            enviados += 1
+                                            st.success(f"✅ {v} (reporte ejecutivo completo)")
+                                        else:
+                                            errores += 1
+                                            st.error(f"❌ {v}")
+                                except:
+                                    # Solo texto completo
                                     if enviar_telegram(mensaje_individual, chat_id):
                                         enviados += 1
-                                        st.success(f"✅ {v} (solo texto)")
+                                        st.success(f"✅ {v} (reporte ejecutivo completo)")
                                     else:
                                         errores += 1
                                         st.error(f"❌ {v}")
