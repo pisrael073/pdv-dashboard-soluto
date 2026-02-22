@@ -262,7 +262,22 @@ def get_gc():
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+    
+    # 🔧 USAR SECRETS EN STREAMLIT CLOUD
+    try:
+        # En Streamlit Cloud (usando secrets)
+        import json
+        creds_dict = dict(st.secrets["google"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    except Exception as e:
+        try:
+            # Fallback local (usando archivo)
+            creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+        except Exception as e2:
+            st.error(f"❌ Error de credenciales: {e2}")
+            st.info("💡 Configura los secrets en Streamlit Cloud o coloca credenciales.json localmente")
+            st.stop()
+    
     return gspread.authorize(creds)
 
 
