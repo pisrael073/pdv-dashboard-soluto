@@ -335,6 +335,184 @@ def generar_imagen_matplotlib(df_v, mv, md, nombre_rep, m_sel):
         return None
 
 
+def generar_reporte_matutino():
+    """Genera reporte automático matutino con resumen del día anterior"""
+    try:
+        # Cargar datos actuales
+        df_v, df_p, _ = cargar_ventas_presupuesto()
+        
+        fecha_ayer = (datetime.now() - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        ventas_ayer = df_v[df_v['Fecha'].dt.strftime('%Y-%m-%d') == fecha_ayer]
+        
+        total_ayer = ventas_ayer['Total'].sum()
+        clientes_ayer = ventas_ayer[ventas_ayer['Total'] > 0]['Cliente'].nunique()
+        
+        # Mes actual
+        mes_actual = datetime.now().strftime('%B %Y')
+        df_mes = df_v[df_v['Fecha'].dt.strftime('%B %Y') == mes_actual]
+        total_mes = df_mes['Total'].sum()
+        meta_mes = df_p['M_V'].sum()
+        pct_mes = round(total_mes / meta_mes * 100, 1) if meta_mes > 0 else 0
+        
+        # Top performer de ayer
+        if not ventas_ayer.empty:
+            top_vendedor = ventas_ayer.groupby('Vendedor')['Total'].sum().idxmax()
+            top_monto = ventas_ayer.groupby('Vendedor')['Total'].sum().max()
+            top_nombre = top_vendedor.split(' - ')[1] if ' - ' in top_vendedor else top_vendedor
+        else:
+            top_nombre = "Sin ventas"
+            top_monto = 0
+        
+        # Días transcurridos del mes
+        dia_actual = datetime.now().day
+        dias_mes = pd.Timestamp.now().days_in_month
+        
+        mensaje = f"""
+🌅 <b>REPORTE MATUTINO - EQUIPO PDV</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 <b>{datetime.now().strftime('%A, %d de %B %Y')}</b>
+🕐 <b>Generado:</b> {datetime.now().strftime('%H:%M')}
+
+📊 <b>RESUMEN DE AYER ({datetime.now() - pd.Timedelta(days=1):%d/%m})</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 Venta Total: <b>${total_ayer:,.0f}</b>
+👥 Clientes Visitados: <b>{clientes_ayer}</b>
+🏆 Top Performer: <b>{top_nombre}</b> (${top_monto:,.0f})
+
+📈 <b>ESTADO DEL MES ({mes_actual})</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💵 Acumulado: <b>${total_mes:,.0f}</b>
+🎯 Meta Mensual: <b>${meta_mes:,.0f}</b>
+📊 Progreso: <b>{pct_mes}%</b>
+📅 Días transcurridos: <b>{dia_actual}/{dias_mes}</b>
+
+⚡ <b>MOTIVACIÓN DEL DÍA</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+        if pct_mes >= 100:
+            mensaje += f"\n🎉 <b>¡FELICITACIONES!</b> Meta mensual SUPERADA"
+        elif pct_mes >= 90:
+            mensaje += f"\n🔥 <b>¡EXCELENTE!</b> Muy cerca de la meta - ¡Empuje final!"
+        elif pct_mes >= 80:
+            mensaje += f"\n💪 <b>¡VAMOS EQUIPO!</b> Estamos en la recta final"
+        else:
+            mensaje += f"\n🚀 <b>¡A ACELERAR!</b> Tenemos todo para lograrlo"
+
+        mensaje += f"""
+
+🎯 <b>OBJETIVO DE HOY:</b>
+├ Necesitamos: <b>${(meta_mes-total_mes)/(dias_mes-dia_actual) if (dias_mes-dia_actual) > 0 else 0:,.0f}/día</b>
+└ Para cerrar: <b>${max(0, meta_mes-total_mes):,.0f}</b>
+
+💎 <b>¡A BRILLAR EQUIPO PDV SIN LÍMITES!</b>
+🚀 <b>Que tengan un día lleno de éxitos</b>
+"""
+        
+        return mensaje
+        
+    except Exception as e:
+        return f"""
+🌅 <b>REPORTE MATUTINO - EQUIPO PDV</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ Error generando reporte: {str(e)}
+📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}
+💎 Sistema PDV Sin Límites
+"""
+
+
+def generar_reporte_nocturno():
+    """Genera reporte automático nocturno con estado del día actual"""
+    try:
+        # Cargar datos actuales
+        df_v, df_p, _ = cargar_ventas_presupuesto()
+        
+        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+        ventas_hoy = df_v[df_v['Fecha'].dt.strftime('%Y-%m-%d') == fecha_hoy]
+        
+        total_hoy = ventas_hoy['Total'].sum()
+        clientes_hoy = ventas_hoy[ventas_hoy['Total'] > 0]['Cliente'].nunique()
+        
+        # Mes actual
+        mes_actual = datetime.now().strftime('%B %Y')
+        df_mes = df_v[df_v['Fecha'].dt.strftime('%B %Y') == mes_actual]
+        total_mes = df_mes['Total'].sum()
+        meta_mes = df_p['M_V'].sum()
+        pct_mes = round(total_mes / meta_mes * 100, 1) if meta_mes > 0 else 0
+        
+        # Ranking del día
+        ranking_hoy = []
+        if not ventas_hoy.empty:
+            ranking_data = ventas_hoy.groupby('Vendedor')['Total'].sum().nlargest(5)
+            for i, (vendedor, monto) in enumerate(ranking_data.items(), 1):
+                nombre = vendedor.split(' - ')[1] if ' - ' in vendedor else vendedor
+                nombre_corto = nombre[:20] + "..." if len(nombre) > 20 else nombre
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+                ranking_hoy.append(f"{emoji} <b>{nombre_corto}</b>: ${monto:,.0f}")
+        
+        # Proyección actualizada
+        dia_actual = datetime.now().day
+        dias_mes = pd.Timestamp.now().days_in_month
+        proyeccion = (total_mes / dia_actual) * dias_mes if dia_actual > 0 else 0
+        
+        mensaje = f"""
+🌙 <b>REPORTE NOCTURNO - EQUIPO PDV</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 <b>{datetime.now().strftime('%A, %d de %B %Y')}</b>
+🕐 <b>Generado:</b> {datetime.now().strftime('%H:%M')}
+
+📊 <b>RESUMEN DEL DÍA ({datetime.now():%d/%m})</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 Venta de Hoy: <b>${total_hoy:,.0f}</b>
+👥 Clientes Atendidos: <b>{clientes_hoy}</b>
+📈 Acumulado Mes: <b>${total_mes:,.0f}</b>
+🎯 Progreso: <b>{pct_mes}%</b> de la meta
+
+🏆 <b>TOP 5 DEL DÍA</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+        if ranking_hoy:
+            for rank in ranking_hoy:
+                mensaje += f"\n{rank}"
+        else:
+            mensaje += f"\n📝 Sin ventas registradas hoy"
+
+        mensaje += f"""
+
+📈 <b>PROYECCIÓN ACTUALIZADA</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔮 Estimado Cierre: <b>${proyeccion:,.0f}</b>
+📊 Vs Meta: <b>{proyeccion/meta_mes*100 if meta_mes > 0 else 0:.1f}%</b>
+⏳ Días Restantes: <b>{dias_mes - dia_actual}</b>
+
+💡 <b>REFLEXIÓN DEL DÍA</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+        if total_hoy >= total_mes / dia_actual:
+            mensaje += f"\n🎉 <b>¡EXCELENTE DÍA!</b> Por encima del promedio necesario"
+        elif total_hoy >= (total_mes / dia_actual) * 0.8:
+            mensaje += f"\n👍 <b>BUEN DÍA</b> Dentro del rango esperado"
+        else:
+            mensaje += f"\n💪 <b>MAÑANA SERÁ MEJOR</b> Oportunidad de recuperar"
+
+        mensaje += f"""
+
+🌟 <b>EQUIPO PDV SIN LÍMITES</b>
+💤 <b>¡Que descansen y mañana a brillar!</b>
+🎯 <b>Cada día es una nueva oportunidad</b>
+"""
+        
+        return mensaje
+        
+    except Exception as e:
+        return f"""
+🌙 <b>REPORTE NOCTURNO - EQUIPO PDV</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ Error generando reporte: {str(e)}
+📅 {datetime.now().strftime('%d/%m/%Y %H:%M')}
+💎 Sistema PDV Sin Límites
+"""
+
+
 def enviar_telegram_con_imagen_alternativa(df_v, mv, md, nombre_rep, m_sel, mensaje, chat_id):
     """Intenta múltiples métodos para enviar imagen por Telegram"""
     
@@ -364,6 +542,45 @@ def enviar_telegram_con_imagen_alternativa(df_v, mv, md, nombre_rep, m_sel, mens
         return True, "TEXTO"
     
     return False, "ERROR"
+
+
+def enviar_dashboard_automatico(tipo="matutino", chat_destino="vendedores"):
+    """Envía dashboard automático matutino o nocturno"""
+    try:
+        if tipo == "matutino":
+            mensaje = generar_reporte_matutino()
+        else:
+            mensaje = generar_reporte_nocturno()
+        
+        chat_id = TELEGRAM_CONFIG['CHAT_IDS'][chat_destino]
+        
+        # Intentar generar gráfico simple para acompañar
+        try:
+            df_v, df_p, _ = cargar_ventas_presupuesto()
+            mes_actual = datetime.now().strftime('%B %Y')
+            df_mes = df_v[df_v['Fecha'].dt.strftime('%B %Y') == mes_actual]
+            
+            if not df_mes.empty:
+                # Generar gráfico simple del progreso del equipo
+                total_mes = df_mes['Total'].sum()
+                meta_mes = df_p['M_V'].sum()
+                
+                img_buffer = generar_imagen_matplotlib(
+                    df_mes, meta_mes, df_p['M_DN'].sum(), 
+                    "EQUIPO CONSOLIDADO", mes_actual
+                )
+                
+                if img_buffer:
+                    img_buffer.seek(0)
+                    return enviar_telegram(mensaje, chat_id, img_buffer)
+        except:
+            pass
+        
+        # Si no se puede generar imagen, enviar solo texto
+        return enviar_telegram(mensaje, chat_id)
+        
+    except Exception as e:
+        return False
 
 
 def generar_reporte_telegram(df_final, mv, md, nombre_rep, m_sel, venta_real, impactos, proy):
@@ -1796,6 +2013,64 @@ def dashboard(df_v_all, df_p, usuario_row):
                             st.success("✅ Reporte global enviado exitosamente")
                         else:
                             st.error("❌ Error enviando reporte global")
+                
+                # ═══ PANEL DASHBOARDS AUTOMÁTICOS ═══
+                st.markdown("---")
+                st.markdown("### 🌅🌙 DASHBOARDS AUTOMÁTICOS")
+                st.markdown("Envía reportes automáticos matutinos y nocturnos al equipo")
+                
+                col_matutino, col_nocturno = st.columns(2)
+                
+                with col_matutino:
+                    st.markdown("#### 🌅 Dashboard Matutino")
+                    st.info("📊 Resumen del día anterior + motivación + meta del día")
+                    
+                    if st.button("🌅 Vista Previa Matutino", use_container_width=True, key="preview_mat"):
+                        mensaje_preview = generar_reporte_matutino()
+                        st.code(mensaje_preview, language=None)
+                    
+                    if st.button("📤 Enviar Dashboard Matutino", 
+                               use_container_width=True, type="primary", key="send_mat"):
+                        with st.spinner("🌅 Enviando dashboard matutino..."):
+                            if enviar_dashboard_automatico("matutino", chat_destino):
+                                st.success("✅ Dashboard matutino enviado exitosamente")
+                                st.info(f"📱 Enviado a: {chat_destino}")
+                            else:
+                                st.error("❌ Error enviando dashboard matutino")
+                
+                with col_nocturno:
+                    st.markdown("#### 🌙 Dashboard Nocturno")
+                    st.info("📊 Resumen del día + ranking + proyección actualizada")
+                    
+                    if st.button("🌙 Vista Previa Nocturno", use_container_width=True, key="preview_noc"):
+                        mensaje_preview = generar_reporte_nocturno()
+                        st.code(mensaje_preview, language=None)
+                    
+                    if st.button("📤 Enviar Dashboard Nocturno", 
+                               use_container_width=True, type="primary", key="send_noc"):
+                        with st.spinner("🌙 Enviando dashboard nocturno..."):
+                            if enviar_dashboard_automatico("nocturno", chat_destino):
+                                st.success("✅ Dashboard nocturno enviado exitosamente")
+                                st.info(f"📱 Enviado a: {chat_destino}")
+                            else:
+                                st.error("❌ Error enviando dashboard nocturno")
+                
+                # Info sobre automatización futura
+                with st.expander("🤖 Automatización Futura"):
+                    st.markdown("""
+                    **🔮 Próximas funciones:**
+                    - ⏰ **Programación automática**: Matutino a las 8:00 AM, nocturno a las 8:00 PM
+                    - 📅 **Solo días laborales**: Lunes a viernes automático  
+                    - 🎯 **Alertas inteligentes**: Cuando alguien esté muy por debajo de meta
+                    - 🏆 **Celebraciones**: Cuando alguien supere la meta
+                    - 📊 **Reportes semanales**: Resumen cada lunes
+                    
+                    **💡 Para implementar estas funciones se necesitaría:**
+                    - Servidor dedicado o servicio de tareas programadas
+                    - Base de datos para guardar configuraciones  
+                    - Sistema de notificaciones push
+                    """)
+            
             else:
                 st.error("📱 Debes activar Telegram en los controles superiores")
                 st.info("👆 Ve arriba y activa '📱 Envío Telegram'")
