@@ -17,12 +17,13 @@ from datetime import datetime
 #  CONFIG TELEGRAM
 # ══════════════════════════════════════════════════════════════════
 
-# TELEGRAM_CONFIG = {
+# 🔧 CONFIGURACIÓN TELEGRAM - DATOS REALES
+TELEGRAM_CONFIG = {
     'BOT_TOKEN': '8249353159:AAFvpNkEUdTcuIu_kpMcQbOtqyB0WbZkGTc',
     'CHAT_IDS': {
         'gerencia': '7900265168',        # Tu chat personal
-        'administracion': '7900265168',  # Tu chat personal  
-        'vendedores': '-5180849774'      # Grupo "Reportes Automaticos"
+        'administracion': '7900265168',  # Tu chat personal
+        'vendedores': '-5180849774'      # Grupo "Reportes Automaticos" 
     }
 }
 
