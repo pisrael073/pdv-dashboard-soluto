@@ -157,11 +157,9 @@ def generar_grafico_telegram(df_v, mv, md, nombre_rep, m_sel):
 
 
 def generar_imagen_matplotlib(df_v, mv, md, nombre_rep, m_sel):
-    """Genera gráfico profesional e impactante usando matplotlib"""
+    """Genera gráfico profesional pero más simple y compatible"""
     try:
         import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-        from matplotlib.patches import Rectangle
         import numpy as np
         import io
         
@@ -170,205 +168,144 @@ def generar_imagen_matplotlib(df_v, mv, md, nombre_rep, m_sel):
         pct_v = round(venta_real / mv * 100, 1) if mv > 0 else 0
         pct_dn = round(impactos / md * 100, 1) if md > 0 else 0
         
-        # Configurar estilo profesional
+        # Colores profesionales
+        def get_color(pct):
+            if pct >= 100: return '#00E676'  # Verde éxito
+            elif pct >= 80: return '#FFB74D'   # Amarillo alerta  
+            else: return '#F44336'             # Rojo crítico
+        
+        # Crear figura con fondo oscuro profesional
         plt.style.use('dark_background')
-        fig = plt.figure(figsize=(16, 12), facecolor='#0a0e1a')
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10), 
+                                                    facecolor='#0a0e1a')
         
-        # Crear layout profesional con GridSpec
-        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3, 
-                             left=0.08, right=0.95, top=0.88, bottom=0.08)
+        # TÍTULO PROFESIONAL
+        fig.suptitle(f'📊 DASHBOARD EJECUTIVO - {nombre_rep}\n{m_sel} • {datetime.now().strftime("%d/%m/%Y %H:%M")}', 
+                    fontsize=18, fontweight='bold', color='#00D4FF', y=0.95)
         
-        # HEADER PROFESIONAL
-        fig.text(0.5, 0.95, f'📊 DASHBOARD EJECUTIVO - {nombre_rep}', 
-                ha='center', va='top', fontsize=24, fontweight='bold', color='#00D4FF')
-        fig.text(0.5, 0.91, f'{m_sel} • Generado: {datetime.now().strftime("%d/%m/%Y %H:%M")}', 
-                ha='center', va='top', fontsize=14, color='#B0BEC5')
-        
-        # COLORES PROFESIONALES
-        colors = {
-            'success': '#00E676',
-            'warning': '#FFB74D', 
-            'danger': '#F44336',
-            'primary': '#2196F3',
-            'accent': '#00D4FF',
-            'text': '#FFFFFF'
-        }
-        
-        def get_status_color(pct):
-            if pct >= 100: return colors['success']
-            elif pct >= 80: return colors['warning']  
-            else: return colors['danger']
-        
-        # 1. GAUGE PRINCIPAL - VENTAS (más grande e impactante)
-        ax1 = fig.add_subplot(gs[0, :2])
-        
-        # Crear gauge circular profesional
-        theta = np.linspace(0, np.pi, 100)
-        radius_outer = 1
-        radius_inner = 0.7
-        
-        # Fondo del gauge
-        ax1.fill_between(theta, radius_inner, radius_outer, color='#263238', alpha=0.3)
-        
-        # Llenar gauge según porcentaje
-        fill_theta = theta[:int(len(theta) * min(pct_v/100, 1.5))]
-        gauge_color = get_status_color(pct_v)
-        ax1.fill_between(fill_theta, radius_inner, radius_outer, color=gauge_color, alpha=0.8)
-        
-        # Agregar marcas y números
-        for i, val in enumerate([0, 25, 50, 75, 100, 125]):
-            angle = np.pi * i / 5
-            x_outer = radius_outer * np.cos(angle)
-            y_outer = radius_outer * np.sin(angle)
-            x_inner = (radius_inner - 0.1) * np.cos(angle)  
-            y_inner = (radius_inner - 0.1) * np.sin(angle)
-            ax1.plot([x_inner, x_outer], [y_inner, y_outer], color='white', linewidth=2)
-            ax1.text(x_inner * 0.8, y_inner * 0.8, f'{val}%', ha='center', va='center', 
-                    color='white', fontsize=10, fontweight='bold')
-        
-        # Aguja del gauge
-        needle_angle = np.pi * min(pct_v/100, 1.5)
-        needle_x = radius_outer * 0.9 * np.cos(needle_angle)
-        needle_y = radius_outer * 0.9 * np.sin(needle_angle)
-        ax1.arrow(0, 0, needle_x, needle_y, head_width=0.05, head_length=0.08, 
-                 fc=colors['accent'], ec=colors['accent'], linewidth=3)
-        
-        # Texto central impactante
-        ax1.text(0, -0.2, f'${venta_real:,.0f}', ha='center', va='center',
-                fontsize=28, fontweight='bold', color=gauge_color)
-        ax1.text(0, -0.4, f'{pct_v}% de Meta', ha='center', va='center',
-                fontsize=16, color='white')
-        ax1.text(0, -0.55, f'Meta: ${mv:,.0f}', ha='center', va='center',
-                fontsize=14, color='#B0BEC5')
-        
+        # 1. GAUGE DE VENTAS - Semicírculo profesional
         ax1.set_xlim(-1.2, 1.2)
-        ax1.set_ylim(-0.8, 1.2)
+        ax1.set_ylim(-0.2, 1.2)
+        
+        # Crear semicírculo base
+        theta = np.linspace(0, np.pi, 50)
+        ax1.fill_between(theta, np.cos(theta)*0.8, np.cos(theta)*1.0, 
+                        color='#263238', alpha=0.3, transform=ax1.transData._b)
+        
+        # Llenar según porcentaje (limitado a 150%)
+        fill_percent = min(pct_v / 100, 1.5)
+        fill_theta = theta[:int(len(theta) * fill_percent)]
+        if len(fill_theta) > 0:
+            ax1.fill_between(fill_theta, np.cos(fill_theta)*0.8, np.cos(fill_theta)*1.0, 
+                           color=get_color(pct_v), alpha=0.8, transform=ax1.transData._b)
+        
+        # Texto central grande
+        ax1.text(0, 0.3, f'${venta_real:,.0f}', ha='center', va='center',
+                fontsize=24, fontweight='bold', color=get_color(pct_v))
+        ax1.text(0, 0.1, f'{pct_v}%', ha='center', va='center',
+                fontsize=20, fontweight='bold', color='white')
+        ax1.text(0, -0.1, f'Meta: ${mv:,.0f}', ha='center', va='center',
+                fontsize=12, color='#B0BEC5')
+        
         ax1.set_aspect('equal')
         ax1.axis('off')
-        ax1.set_title('💰 PERFORMANCE DE VENTAS', fontsize=18, fontweight='bold', 
-                     color=colors['accent'], pad=20)
+        ax1.set_title('💰 VENTAS', fontsize=16, fontweight='bold', color='#00D4FF', pad=20)
         
-        # 2. COBERTURA DN - Gauge circular más pequeño
-        ax2 = fig.add_subplot(gs[0, 2])
+        # 2. GAUGE DN - Más simple pero efectivo
+        ax2.set_xlim(-1.2, 1.2)
+        ax2.set_ylim(-1.2, 1.2)
         
-        # Gauge circular para DN
-        theta_dn = np.linspace(0, 2*np.pi, 100)
-        fill_dn = theta_dn[:int(len(theta_dn) * min(pct_dn/100, 1))]
+        # Círculo base para DN
+        circle_bg = plt.Circle((0, 0), 1, fill=False, edgecolor='#263238', linewidth=8)
+        ax2.add_patch(circle_bg)
         
-        ax2.fill_between(theta_dn, 0.6, 0.9, color='#263238', alpha=0.3)
-        ax2.fill_between(fill_dn, 0.6, 0.9, color=get_status_color(pct_dn), alpha=0.8)
+        # Círculo de progreso
+        circle_progress = plt.Circle((0, 0), 1, fill=False, 
+                                   edgecolor=get_color(pct_dn), linewidth=8,
+                                   clip_on=False)
+        # Aproximar el arco con línea punteada
+        if pct_dn > 0:
+            circle_progress.set_linestyle('-')
+            ax2.add_patch(circle_progress)
         
-        ax2.text(0, 0, f'{impactos}', ha='center', va='center',
-                fontsize=24, fontweight='bold', color=get_status_color(pct_dn))
-        ax2.text(0, -0.25, f'{pct_dn}% DN', ha='center', va='center',
-                fontsize=12, color='white')
+        ax2.text(0, 0.2, f'{impactos}', ha='center', va='center',
+                fontsize=28, fontweight='bold', color=get_color(pct_dn))
+        ax2.text(0, -0.2, f'{pct_dn}% DN', ha='center', va='center',
+                fontsize=14, color='white')
         ax2.text(0, -0.4, f'Meta: {int(md)}', ha='center', va='center',
                 fontsize=10, color='#B0BEC5')
         
-        ax2.set_xlim(-1.2, 1.2)
-        ax2.set_ylim(-1.2, 1.2)
         ax2.set_aspect('equal')
         ax2.axis('off')
-        ax2.set_title('👥 COBERTURA DN', fontsize=14, fontweight='bold', color=colors['accent'])
+        ax2.set_title('👥 COBERTURA DN', fontsize=16, fontweight='bold', color='#00D4FF')
         
-        # 3. TOP MARCAS - Donut chart profesional
-        ax3 = fig.add_subplot(gs[1, :2])
-        
+        # 3. TOP MARCAS - Pie chart mejorado
         if not df_v.empty and 'Marca' in df_v.columns:
             marcas = df_v.groupby('Marca')['Total'].sum().nlargest(5)
             colores_marcas = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57']
             
-            wedges, texts, autotexts = ax3.pie(marcas.values, labels=marcas.index, 
-                                              autopct=lambda pct: f'{pct:.1f}%\n${marcas.values[int(pct*len(marcas.values)/100)]:.0f}',
+            wedges, texts, autotexts = ax3.pie(marcas.values, 
+                                              labels=[f'{m}' for m in marcas.index],
+                                              autopct='%1.1f%%',
                                               colors=colores_marcas,
-                                              pctdistance=0.85,
                                               startangle=90,
-                                              wedgeprops=dict(width=0.5, edgecolor='white', linewidth=2))
+                                              textprops={'color': 'white', 'fontweight': 'bold'})
             
-            # Estilo profesional para textos
             for autotext in autotexts:
-                autotext.set_color('white')
-                autotext.set_fontsize(10)
+                autotext.set_fontsize(11)
                 autotext.set_fontweight('bold')
-                
-            for text in texts:
-                text.set_fontsize(12)
-                text.set_fontweight('bold')
-                text.set_color('white')
         
-        ax3.set_title('🏆 TOP 5 MARCAS', fontsize=16, fontweight='bold', color=colors['accent'])
+        ax3.set_title('🏆 TOP 5 MARCAS', fontsize=16, fontweight='bold', color='#00D4FF')
         
-        # 4. PROYECCIÓN - Gráfico de barras con gradiente
-        ax4 = fig.add_subplot(gs[1, 2])
-        
+        # 4. PROYECCIÓN - Barras profesionales
         proy = calcular_proyeccion(venta_real, df_v['Fecha'].max()) if not df_v.empty else 0
-        valores_proy = [venta_real, mv, proy]
-        labels_proy = ['Actual', 'Meta', 'Proyección']
-        colores_proy = [get_status_color(pct_v), colors['primary'], colors['warning']]
+        valores = [venta_real, mv, proy]
+        labels = ['Actual', 'Meta', 'Proyección']
+        colores = [get_color(pct_v), '#2196F3', '#FFB74D']
         
-        bars = ax4.bar(labels_proy, valores_proy, color=colores_proy, 
+        bars = ax4.bar(labels, valores, color=colores, 
                       edgecolor='white', linewidth=2, alpha=0.8)
         
-        # Añadir valores encima de las barras
-        for bar, valor in zip(bars, valores_proy):
+        # Valores encima de barras
+        for bar, valor in zip(bars, valores):
             height = bar.get_height()
-            ax4.text(bar.get_x() + bar.get_width()/2., height + max(valores_proy)*0.02,
+            ax4.text(bar.get_x() + bar.get_width()/2., height + max(valores)*0.02,
                     f'${valor:,.0f}', ha='center', va='bottom', 
-                    color='white', fontweight='bold', fontsize=11)
+                    color='white', fontweight='bold', fontsize=12)
         
         ax4.set_ylabel('Valor ($)', color='white', fontweight='bold')
         ax4.tick_params(colors='white')
-        ax4.set_title('📈 PROYECCIÓN VS META', fontsize=14, fontweight='bold', color=colors['accent'])
-        ax4.grid(True, alpha=0.3)
+        ax4.set_title('📈 PROYECCIÓN', fontsize=16, fontweight='bold', color='#00D4FF')
+        ax4.grid(True, alpha=0.2)
         
-        # 5. MÉTRICAS CLAVE - Panel inferior
-        ax5 = fig.add_subplot(gs[2, :])
-        ax5.axis('off')
-        
-        # Calcular métricas adicionales
-        dias_mes = datetime.now().day
-        total_dias_mes = 31  # Aproximado
-        ritmo_actual = venta_real / dias_mes if dias_mes > 0 else 0
-        ritmo_necesario = (mv - venta_real) / (total_dias_mes - dias_mes) if (total_dias_mes - dias_mes) > 0 else 0
-        
-        metricas_text = f"""
-📊 MÉTRICAS EJECUTIVAS:
-• Ritmo Actual: ${ritmo_actual:,.0f}/día  • Ritmo Necesario: ${ritmo_necesario:,.0f}/día
-• Promedio/Cliente: ${venta_real/impactos if impactos > 0 else 0:,.0f}  • Días Transcurridos: {dias_mes}/{total_dias_mes}
-• Para Meta Faltan: ${max(0, mv-venta_real):,.0f}  • Status: """
-        
+        # Status en la parte inferior
         if pct_v >= 100:
-            status = "🟢 EXCELENTE - Meta Superada"
+            status = "🟢 EXCELENTE"
         elif pct_v >= 90:
-            status = "🟡 EN RUTA - Muy Cerca"
+            status = "🟡 EN RUTA"
         elif pct_v >= 80:
-            status = "🟠 ATENCIÓN - Acelerar"
+            status = "🟠 ATENCIÓN"
         else:
-            status = "🔴 CRÍTICO - Acción Inmediata"
+            status = "🔴 CRÍTICO"
             
-        metricas_text += status
-        
-        ax5.text(0.02, 0.8, metricas_text, fontsize=13, color='white',
-                transform=ax5.transAxes, verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.5", facecolor='#1e293b', alpha=0.8))
-        
-        # Footer profesional
-        fig.text(0.99, 0.02, '💎 Sistema PDV Sin Límites - Reporte Automático', 
-                ha='right', va='bottom', fontsize=10, color='#64748B', style='italic')
+        fig.text(0.5, 0.02, f'{status} • Sistema PDV Sin Límites', 
+                ha='center', va='bottom', fontsize=12, color='white', 
+                fontweight='bold')
         
         plt.tight_layout()
+        plt.subplots_adjust(top=0.88)
         
-        # Convertir a bytes con alta calidad
+        # Generar imagen con alta calidad pero más ligera
         img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format='png', dpi=200, bbox_inches='tight', 
-                   facecolor='#0a0e1a', edgecolor='none', quality=95)
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', 
+                   facecolor='#0a0e1a', edgecolor='none')
         img_buffer.seek(0)
         plt.close()
         
         return img_buffer
         
     except Exception as e:
-        print(f"Error generando matplotlib profesional: {e}")
+        print(f"Error en matplotlib simplificado: {e}")
         return None
 
 
