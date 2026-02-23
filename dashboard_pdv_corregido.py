@@ -1346,16 +1346,154 @@ def dashboard(df_v_all, df_p, usuario_row):
     # ── Tab 1: Scorecard ──────────────────────────────────────────
     with tab1:
         with st.spinner("Generando scorecard..."):
-            fig = generar_scorecard(df_final, mv, md, nombre_rep, m_sel)
-            st.plotly_chart(fig, use_container_width=True)
+            # Detectar si es móvil usando viewport width
+            is_mobile = st.container()
+            
+            # VERSIÓN DESKTOP: Scorecard completo
+            if True:  # Siempre mostrar versión separada por ahora
+                st.markdown("### 📊 DASHBOARD EJECUTIVO")
+                
+                # ROW 1: Métricas principales
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    delta_v = f"+{pct_v-100:.1f}%" if pct_v >= 100 else f"{pct_v-100:.1f}%"
+                    st.metric("💰 Venta Real", f"${venta_real:,.0f}", delta_v)
+                
+                with col2:
+                    st.metric("🎯 Meta", f"${mv:,.0f}", f"{pct_v:.1f}%")
+                
+                with col3:
+                    delta_dn = f"+{pct_dn-100:.1f}%" if pct_dn >= 100 else f"{pct_dn-100:.1f}%"
+                    st.metric("👥 Cobertura DN", f"{impactos}/{int(md)}", delta_dn)
+                
+                with col4:
+                    st.metric("📈 Proyección", f"${proy:,.0f}", 
+                             f"{'🟢' if proy >= mv else '🟡' if proy >= mv*0.9 else '🔴'}")
+                
+                st.markdown("---")
+                
+                # ROW 2: Gráficos separados (mejor para móvil)
+                col_left, col_right = st.columns(2)
+                
+                with col_left:
+                    # GRÁFICO 1: Ventas vs Meta
+                    fig_ventas = go.Figure()
+                    
+                    fig_ventas.add_trace(go.Bar(
+                        x=['Venta Real', 'Meta'],
+                        y=[venta_real, mv],
+                        marker_color=['#4CAF50' if pct_v >= 100 else '#FF9800' if pct_v >= 80 else '#F44336', '#2196F3'],
+                        text=[f'${venta_real:,.0f}', f'${mv:,.0f}'],
+                        textposition='auto',
+                        textfont_color='white',
+                        textfont_size=14
+                    ))
+                    
+                    fig_ventas.update_layout(
+                        title=f'💰 Ventas vs Meta ({pct_v}%)',
+                        template='plotly_dark',
+                        height=300,
+                        showlegend=False,
+                        title_font_color='#00D4FF',
+                        title_font_size=16
+                    )
+                    
+                    st.plotly_chart(fig_ventas, use_container_width=True)
+                
+                with col_right:
+                    # GRÁFICO 2: Cobertura DN
+                    fig_dn = go.Figure()
+                    
+                    fig_dn.add_trace(go.Bar(
+                        x=['DN Real', 'Meta DN'],
+                        y=[impactos, md],
+                        marker_color=['#4CAF50' if pct_dn >= 100 else '#FF9800' if pct_dn >= 80 else '#F44336', '#2196F3'],
+                        text=[f'{impactos}', f'{int(md)}'],
+                        textposition='auto',
+                        textfont_color='white',
+                        textfont_size=14
+                    ))
+                    
+                    fig_dn.update_layout(
+                        title=f'👥 Cobertura DN ({pct_dn}%)',
+                        template='plotly_dark',
+                        height=300,
+                        showlegend=False,
+                        title_font_color='#00D4FF',
+                        title_font_size=16
+                    )
+                    
+                    st.plotly_chart(fig_dn, use_container_width=True)
+                
+                # ROW 3: Gráficos adicionales
+                col_marcas, col_proy = st.columns(2)
+                
+                with col_marcas:
+                    # GRÁFICO 3: Top Marcas
+                    if not df_final.empty and 'Marca' in df_final.columns:
+                        marcas_data = df_final.groupby('Marca')['Total'].sum().nlargest(5)
+                        
+                        fig_marcas = go.Figure(data=[go.Pie(
+                            labels=marcas_data.index,
+                            values=marcas_data.values,
+                            hole=0.4,
+                            textinfo='label+percent',
+                            textfont_size=12,
+                            marker_colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57']
+                        )])
+                        
+                        fig_marcas.update_layout(
+                            title='🏆 Top 5 Marcas',
+                            template='plotly_dark',
+                            height=300,
+                            title_font_color='#00D4FF',
+                            title_font_size=16
+                        )
+                        
+                        st.plotly_chart(fig_marcas, use_container_width=True)
+                
+                with col_proy:
+                    # GRÁFICO 4: Comparativa Proyección
+                    fig_comp = go.Figure()
+                    
+                    valores = [venta_real, mv, proy]
+                    labels = ['Actual', 'Meta', 'Proyección']
+                    colors = ['#4CAF50' if pct_v >= 100 else '#FF9800', '#2196F3', '#9C27B0']
+                    
+                    fig_comp.add_trace(go.Bar(
+                        x=labels,
+                        y=valores,
+                        marker_color=colors,
+                        text=[f'${v:,.0f}' for v in valores],
+                        textposition='auto',
+                        textfont_color='white',
+                        textfont_size=12
+                    ))
+                    
+                    # Línea de meta
+                    fig_comp.add_hline(y=mv, line_dash="dash", line_color="#2196F3", 
+                                      annotation_text="Meta", annotation_position="top right")
+                    
+                    fig_comp.update_layout(
+                        title='📈 Actual vs Proyección',
+                        template='plotly_dark',
+                        height=300,
+                        showlegend=False,
+                        title_font_color='#00D4FF',
+                        title_font_size=16
+                    )
+                    
+                    st.plotly_chart(fig_comp, use_container_width=True)
             
             # Botones de descarga y envío
             col_png, col_telegram = st.columns(2)
             
             with col_png:
-                # 🔧 FIX: Usar try-catch para PNG, fallback a HTML
+                # Para descarga, generar el scorecard original completo
                 try:
-                    img = pio.to_image(fig, format="png", scale=2.0)
+                    fig_completo = generar_scorecard(df_final, mv, md, nombre_rep, m_sel)
+                    img = pio.to_image(fig_completo, format="png", scale=2.0)
                     st.download_button(
                         f"📥 Descargar PNG — {nombre_rep}", img,
                         f"Scorecard_{nombre_rep.replace(' ', '_')}_{m_sel}.png",
@@ -1363,7 +1501,7 @@ def dashboard(df_v_all, df_p, usuario_row):
                     )
                 except Exception as e:
                     # Fallback: Descargar como HTML interactivo
-                    html_string = pio.to_html(fig, include_plotlyjs='cdn')
+                    html_string = pio.to_html(fig_completo, include_plotlyjs='cdn')
                     st.download_button(
                         f"📥 Descargar HTML — {nombre_rep}", html_string.encode(),
                         f"Scorecard_{nombre_rep.replace(' ', '_')}_{m_sel}.html",
