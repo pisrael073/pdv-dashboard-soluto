@@ -544,6 +544,116 @@ div[data-testid="stSidebar"]{background:linear-gradient(180deg,#0A0F1E,#111827);
 .stTabs [data-baseweb="tab-list"]{background:#111827;border-radius:10px;padding:4px;gap:4px;}
 .stTabs [data-baseweb="tab"]{background:transparent!important;color:#64748B!important;border-radius:8px!important;font-weight:600!important;}
 .stTabs [aria-selected="true"]{background:#1E3A8A!important;color:#fff!important;}
+
+/* ═══ RESPONSIVE MOBILE DESIGN ═══ */
+@media (max-width: 768px) {
+    .block-container{padding:0.5rem 0.75rem!important;}
+    
+    /* Header responsive */
+    .top-bar{
+        flex-direction:column!important;
+        text-align:center!important;
+        padding:12px 16px!important;
+        gap:8px;
+    }
+    .top-bar-title{font-size:1.1rem!important;}
+    .top-bar-user{font-size:0.7rem!important;text-align:center!important;}
+    .top-bar-badge{font-size:0.6rem!important;padding:3px 10px!important;}
+    .admin-badge{font-size:0.6rem!important;padding:2px 8px!important;margin-left:0!important;margin-top:4px!important;}
+    
+    /* Botones móvil */
+    .stButton>button{
+        width:100%!important;
+        height:48px!important;
+        font-size:16px!important;
+        margin:8px 0!important;
+    }
+    
+    /* Selectores móvil */
+    .stSelectbox>div>div>div{
+        font-size:16px!important;
+        min-height:44px!important;
+    }
+    
+    /* Checkbox móvil */
+    .stCheckbox>label{
+        font-size:16px!important;
+        min-height:44px!important;
+        display:flex!important;
+        align-items:center!important;
+    }
+    
+    /* Tabs móvil */
+    .stTabs [data-baseweb="tab-list"]{
+        flex-wrap:wrap!important;
+        gap:2px!important;
+    }
+    .stTabs [data-baseweb="tab"]{
+        padding:12px 8px!important;
+        font-size:14px!important;
+        min-width:auto!important;
+        flex:1!important;
+    }
+    
+    /* Gráficos móvil */
+    .js-plotly-plot{
+        height:350px!important;
+    }
+    
+    /* KPIs móvil */
+    .kpi-card{
+        margin-bottom:12px!important;
+        padding:16px!important;
+    }
+    .kpi-val{font-size:1.5rem!important;}
+    .kpi-lbl{font-size:0.6rem!important;}
+    .kpi-sub{font-size:0.65rem!important;}
+    
+    /* Tablas móvil */
+    .dataframe{
+        font-size:12px!important;
+        overflow-x:auto!important;
+    }
+    .dataframe th,.dataframe td{
+        padding:6px 4px!important;
+        white-space:nowrap!important;
+    }
+    
+    /* Sidebar móvil */
+    div[data-testid="stSidebar"]>div:first-child{
+        width:300px!important;
+    }
+    
+    /* Login móvil */
+    .login-logo{font-size:1.8rem!important;}
+    .login-sub{font-size:0.75rem!important;}
+}
+
+/* ═══ TABLET OPTIMIZATIONS ═══ */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .block-container{padding:0.75rem 1.25rem!important;}
+    .top-bar-title{font-size:1.2rem!important;}
+    .js-plotly-plot{height:400px!important;}
+}
+
+/* ═══ TOUCH IMPROVEMENTS ═══ */
+@media (hover: none) and (pointer: coarse) {
+    .stButton>button:hover{
+        background:linear-gradient(135deg,#1E40AF,#3B82F6)!important;
+    }
+    
+    /* Mejor tap targets */
+    button,select,input[type="checkbox"]{
+        min-height:44px!important;
+        min-width:44px!important;
+    }
+}
+
+/* ═══ LANDSCAPE MOBILE ═══ */
+@media (max-width: 768px) and (orientation: landscape) {
+    .js-plotly-plot{height:300px!important;}
+    .top-bar{padding:8px 12px!important;}
+}
 </style>
 """, unsafe_allow_html=True)
 
