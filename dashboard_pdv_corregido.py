@@ -624,6 +624,9 @@ def cargar_ventas_netas():
     col_vend = find_col(df, 'VENDEDOR')
     col_subt = find_col(df, 'SUBT RL')
     col_cli  = find_col(df, 'CLI')
+    col_nc   = find_col(df, 'NC. TOTAL')   # columna NC. Total
+    if col_nc is None:
+        col_nc = find_col(df, 'NC TOTAL')  # fallback sin punto
     df['Vendedor'] = df[col_vend].astype(str).str.strip() if col_vend else ''
     if col_subt:
         df['SubT_RL'] = pd.to_numeric(
@@ -637,6 +640,12 @@ def cargar_ventas_netas():
         ).fillna(0).astype(int)
     else:
         df['Num_Cli'] = 0
+    if col_nc:
+        df['NC_Total'] = pd.to_numeric(
+            df[col_nc].astype(str).str.replace(r'[$,\s]', '', regex=True), errors='coerce'
+        ).fillna(0)
+    else:
+        df['NC_Total'] = 0
     descomp = df['Vendedor'].apply(descomponer_vendedor)
     df['_codigo_pdv']  = descomp.apply(lambda x: x[0])
     df['_nombre_vend'] = descomp.apply(lambda x: x[1])
@@ -674,24 +683,24 @@ def filtrar_presupuesto_usuario(df_p, u):
 # ══════════════════════════════════════════════════════════════════
 def obtener_kpis_ventas_netas(df_vn, u):
     """
-    Devuelve (venta_real, impactos, metodo, tipo) desde VENTAS_NETAS.
-      venta_real = SubT RL.   |   impactos = # Cli.
+    Devuelve (venta_real, impactos, nc_total, metodo, tipo) desde VENTAS_NETAS.
+      venta_real = SubT RL.  |  impactos = # Cli.  |  nc_total = NC. Total
     """
     codigo = str(u.get('_codigo_pdv', '')).strip().upper()
     nombre = str(u.get('_nombre_norm', '')).strip().upper()
     if df_vn.empty:
-        return 0, 0, "⚠️ Hoja VENTAS_NETAS no disponible", "warn"
+        return 0, 0, 0, "⚠️ Hoja VENTAS_NETAS no disponible", "warn"
     if codigo and codigo not in ('', 'NAN', 'NONE'):
         mask = df_vn['_codigo_pdv'] == codigo
         if mask.sum() > 0:
             f = df_vn[mask].iloc[0]
-            return float(f['SubT_RL']), int(f['Num_Cli']), f"✅ KPIs de VENTAS_NETAS — {codigo}", "ok"
+            return float(f['SubT_RL']), int(f['Num_Cli']), float(f.get('NC_Total', 0)), f"✅ KPIs de VENTAS_NETAS — {codigo}", "ok"
     if nombre:
         mask = df_vn['_nombre_vend'] == nombre
         if mask.sum() > 0:
             f = df_vn[mask].iloc[0]
-            return float(f['SubT_RL']), int(f['Num_Cli']), f"✅ KPIs de VENTAS_NETAS — {nombre}", "ok"
-    return 0, 0, f"❌ Sin fila en VENTAS_NETAS para {codigo or nombre}", "err"
+            return float(f['SubT_RL']), int(f['Num_Cli']), float(f.get('NC_Total', 0)), f"✅ KPIs de VENTAS_NETAS — {nombre}", "ok"
+    return 0, 0, 0, f"❌ Sin fila en VENTAS_NETAS para {codigo or nombre}", "err"
 
 
 def pantalla_login():
@@ -879,7 +888,7 @@ def dashboard(df_v_all, df_p, usuario_row):
         return
 
     # ══════════════════════════════════════════════════════════════
-    #  ✅ KPIs DESDE VENTAS_NETAS (SubT RL. y # Cli.)
+    #  ✅ KPIs DESDE VENTAS_NETAS (SubT RL., # Cli., NC. Total)
     # ══════════════════════════════════════════════════════════════
     df_vn = cargar_ventas_netas()
 
@@ -887,13 +896,14 @@ def dashboard(df_v_all, df_p, usuario_row):
         if not df_vn.empty:
             venta_real = float(df_vn['SubT_RL'].sum())
             impactos   = int(df_vn['Num_Cli'].sum())
-            metodo_vn  = "✅ KPIs GLOBAL desde VENTAS_NETAS (SubT RL. + # Cli.)"
+            nc_total   = float(df_vn['NC_Total'].sum())
+            metodo_vn  = "✅ KPIs GLOBAL desde VENTAS_NETAS (SubT RL. + # Cli. + NC. Total)"
         else:
             venta_real = df_final['Total'].sum()
             impactos   = df_final[df_final['Total'] > 0]['Cliente'].nunique()
+            nc_total   = 0
             metodo_vn  = "⚠️ Fallback GLOBAL — hoja VENTAS (VENTAS_NETAS no disponible)"
     else:
-        # Determinar qué usuario buscar en VENTAS_NETAS
         if is_super_admin and v_admin and v_admin != "GLOBAL":
             cod_vn, nom_vn = descomponer_vendedor(v_admin)
             u_vn = {'_codigo_pdv': cod_vn, '_nombre_norm': nom_vn}
@@ -902,12 +912,12 @@ def dashboard(df_v_all, df_p, usuario_row):
         else:
             u_vn = usuario_row
 
-        venta_real, impactos, metodo_vn, tipo_vn = obtener_kpis_ventas_netas(df_vn, u_vn)
+        venta_real, impactos, nc_total, metodo_vn, tipo_vn = obtener_kpis_ventas_netas(df_vn, u_vn)
 
-        # Fallback si no se encontró en VENTAS_NETAS
         if venta_real == 0 and impactos == 0:
             venta_real = df_final['Total'].sum()
             impactos   = df_final[df_final['Total'] > 0]['Cliente'].nunique()
+            nc_total   = 0
             metodo_vn  = "⚠️ Fallback — hoja VENTAS (no encontrado en VENTAS_NETAS)"
 
     cls_vn = 'cruce-ok' if 'VENTAS_NETAS' in metodo_vn else 'cruce-err'
@@ -919,12 +929,13 @@ def dashboard(df_v_all, df_p, usuario_row):
     pct_dn    = round(impactos   / md * 100, 1) if md > 0 else 0
 
     st.markdown(f"<div class='section-title'>📊 {m_sel} — {nombre_rep}</div>", unsafe_allow_html=True)
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     kpi_card(k1, venta_real, "Venta Neta", f"Meta ${mv:,.0f}", "#3B82F6")
     kpi_card(k2, pct_v, "% Avance Meta", f"${venta_real:,.0f}", "#10B981" if pct_v >= 100 else "#F59E0B", prefix="", suffix="%")
     kpi_card(k3, impactos, "Clientes DN", f"Meta {int(md)}", "#F59E0B", prefix="")
     kpi_card(k4, pct_dn, "% Cobertura DN", f"{impactos} visitados", "#A855F7" if pct_dn >= 100 else "#60A5FA", prefix="", suffix="%")
     kpi_card(k5, proy, "Proyección Cierre", "✅ ON TRACK" if proy >= mv else "⚠️ Riesgo", "#10B981" if proy >= mv else "#EF4444")
+    kpi_card(k6, nc_total, "NC Emitidas", "Notas de Crédito", "#EF4444")
     st.markdown("<br>", unsafe_allow_html=True)
 
     if is_super_admin:
@@ -1061,7 +1072,7 @@ def dashboard(df_v_all, df_p, usuario_row):
                         mv_i = float(pr['M_V']) if pr is not None else 0
                         md_i = float(pr['M_DN']) if pr is not None else 0
                         # Obtener KPIs desde VENTAS_NETAS para el reporte masivo
-                        vr_i, imp_i, _, _ = obtener_kpis_ventas_netas(df_vn, u_tmp)
+                        vr_i, imp_i, _, _, _ = obtener_kpis_ventas_netas(df_vn, u_tmp)
                         if vr_i == 0 and imp_i == 0 and not dv.empty:
                             vr_i = dv['Total'].sum()
                             imp_i = dv[dv['Total'] > 0]['Cliente'].nunique()
@@ -1141,7 +1152,7 @@ def dashboard(df_v_all, df_p, usuario_row):
             for _, u in df_users.iterrows():
                 dv_u, met, _ = filtrar_ventas_usuario(df_mes, u)
                 pr_u = filtrar_presupuesto_usuario(df_p, u)
-                vr_u, imp_u, met_vn, _ = obtener_kpis_ventas_netas(df_vn, u)
+                vr_u, imp_u, _, met_vn, _ = obtener_kpis_ventas_netas(df_vn, u)
                 filas.append({
                     'Usuario': str(u.get('_nombre_orig', '')), 'Código PDV': str(u['_codigo_pdv']),
                     'Ventas #': len(dv_u), 'VENTAS_NETAS $': f"${vr_u:,.0f}" if vr_u > 0 else "—",
