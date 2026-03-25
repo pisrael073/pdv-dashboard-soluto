@@ -31,7 +31,12 @@ def es_super_admin(user_codigo, user_nombre):
 
 
 def tiene_permisos_admin(user_rol):
-    return user_rol.lower() in ('admin', 'administrador', 'gerente', 'supervisor', 'jefe')
+    rol = user_rol.lower()
+    return rol in ('admin', 'administrador', 'gerente', 'jefe')
+
+
+def es_supervisor(user_rol):
+    return 'supervisor' in user_rol.lower()
 
 
 def enviar_telegram(mensaje, chat_id=None, imagen=None):
@@ -800,11 +805,13 @@ def dashboard(df_v_all, df_p, usuario_row):
     user_zona   = st.session_state['user_zona']
     user_codigo = st.session_state['user_codigo']
     is_super_admin = es_super_admin(user_codigo, user_nombre)
-    is_admin = tiene_permisos_admin(user_rol)
+    is_supervisor  = es_supervisor(user_rol) and not is_super_admin
+    is_admin       = tiene_permisos_admin(user_rol) and not is_super_admin
 
-    if is_super_admin: admin_badge = "<span class='admin-badge'>SUPER ADMIN</span>"
-    elif is_admin: admin_badge = "<span class='admin-badge'>Admin</span>"
-    else: admin_badge = ""
+    if is_super_admin:  admin_badge = "<span class='admin-badge'>SUPER ADMIN</span>"
+    elif is_supervisor: admin_badge = "<span class='admin-badge' style='background:#00695C;'>SUPERVISOR</span>"
+    elif is_admin:      admin_badge = "<span class='admin-badge'>Admin</span>"
+    else:               admin_badge = ""
     cod_lbl = (f"<span style='color:#475569;font-size:0.7rem;margin-left:8px;'>[{user_codigo}]</span>") if user_codigo else ""
     st.markdown(f"<div class='top-bar'><div><span class='top-bar-title'>💎 PDV Sin Límites</span>{admin_badge}</div><div><div class='top-bar-user'>👤 {user_nombre}{cod_lbl}</div><div class='top-bar-badge'>{user_zona or 'SIN ZONA'}</div></div></div>", unsafe_allow_html=True)
 
@@ -843,12 +850,55 @@ def dashboard(df_v_all, df_p, usuario_row):
     df_mes = df_v_all[df_v_all['Mes_N'] == m_sel].copy()
 
     v_admin = None
+    df_zona_users = None  # usado por supervisor para el bloque de VN
     if is_super_admin:
         vends_raw = sorted(df_mes['Vendedor'].dropna().unique().tolist())
         v_admin = st.selectbox("👤 Vendedor a analizar", ["GLOBAL"] + vends_raw, key="vend_admin")
         if v_admin == "GLOBAL":
             df_final, metodo, tipo = df_mes.copy(), "Vista GLOBAL — todos los vendedores", "ok"
             mv = df_p['M_V'].sum(); md = df_p['M_DN'].sum(); nombre_rep = "GLOBAL"
+        else:
+            cod_v, nom_v = descomponer_vendedor(v_admin)
+            u_tmp = pd.Series({'_codigo_pdv': cod_v, '_nombre_norm': nom_v})
+            df_final, metodo, tipo = filtrar_ventas_usuario(df_mes, u_tmp)
+            pres = filtrar_presupuesto_usuario(df_p, u_tmp)
+            mv = float(pres['M_V']) if pres is not None else 0
+            md = float(pres['M_DN']) if pres is not None else 0
+            nombre_rep = v_admin
+    elif is_supervisor:
+        # ── Carga usuarios y filtra solo los de la misma zona del supervisor ──
+        _df_users_all = cargar_usuarios()
+        _mask_zona   = _df_users_all['_zona'].str.strip().str.upper() == user_zona.strip().upper()
+        _mask_no_sup = ~_df_users_all['_rol'].str.lower().str.contains('supervisor', na=False)
+        df_zona_users = _df_users_all[_mask_zona & _mask_no_sup].copy()
+
+        # Vendedores en ventas que coincidan por código o nombre con los de la zona
+        _codigos_zona = set(df_zona_users['_codigo_pdv'].str.upper().tolist()) - {'', 'NAN', 'NONE'}
+        _nombres_zona = set(df_zona_users['_nombre_norm'].tolist()) - {''}
+        vends_zona = sorted([
+            v for v in df_mes['Vendedor'].dropna().unique()
+            if descomponer_vendedor(v)[0] in _codigos_zona
+            or descomponer_vendedor(v)[1] in _nombres_zona
+        ])
+
+        _label_global = f"GLOBAL ZONA {user_zona}"
+        v_admin = st.selectbox(
+            f"👤 Vendedores de tu zona ({user_zona}) — {len(vends_zona)} asignados:",
+            [_label_global] + vends_zona,
+            key="vend_admin"
+        )
+
+        if v_admin == _label_global:
+            df_final = df_mes[df_mes['Vendedor'].isin(vends_zona)].copy()
+            metodo   = f"Vista ZONA {user_zona} — {len(vends_zona)} vendedores asignados"
+            tipo     = "ok"
+            mv = 0.0; md = 0.0
+            for _, _u_z in df_zona_users.iterrows():
+                _pres = filtrar_presupuesto_usuario(df_p, _u_z)
+                if _pres is not None:
+                    mv += float(_pres['M_V'])
+                    md += float(_pres['M_DN'])
+            nombre_rep = f"ZONA {user_zona}"
         else:
             cod_v, nom_v = descomponer_vendedor(v_admin)
             u_tmp = pd.Series({'_codigo_pdv': cod_v, '_nombre_norm': nom_v})
@@ -903,8 +953,29 @@ def dashboard(df_v_all, df_p, usuario_row):
             impactos   = df_final[df_final['Total'] > 0]['Cliente'].nunique()
             nc_total   = 0
             metodo_vn  = "⚠️ Fallback GLOBAL — hoja VENTAS (VENTAS_NETAS no disponible)"
+    elif nombre_rep.startswith("ZONA ") and df_zona_users is not None:
+        # ── KPIs de zona: suma de todos los vendedores asignados al supervisor ──
+        if not df_vn.empty:
+            venta_real = 0.0; impactos = 0; nc_total = 0.0
+            for _, _u_z in df_zona_users.iterrows():
+                _vr, _imp, _nc, _, _ = obtener_kpis_ventas_netas(df_vn, _u_z.to_dict())
+                venta_real += _vr; impactos += _imp; nc_total += _nc
+            if venta_real == 0 and impactos == 0:
+                venta_real = df_final['Total'].sum()
+                impactos   = df_final[df_final['Total'] > 0]['Cliente'].nunique()
+                metodo_vn  = f"⚠️ Fallback ZONA {user_zona} — hoja VENTAS"
+            else:
+                metodo_vn = f"✅ KPIs ZONA {user_zona} desde VENTAS_NETAS ({len(df_zona_users)} vendedores)"
+        else:
+            venta_real = df_final['Total'].sum()
+            impactos   = df_final[df_final['Total'] > 0]['Cliente'].nunique()
+            nc_total   = 0
+            metodo_vn  = f"⚠️ Fallback ZONA {user_zona} — VENTAS_NETAS no disponible"
     else:
         if is_super_admin and v_admin and v_admin != "GLOBAL":
+            cod_vn, nom_vn = descomponer_vendedor(v_admin)
+            u_vn = {'_codigo_pdv': cod_vn, '_nombre_norm': nom_vn}
+        elif is_supervisor and v_admin:
             cod_vn, nom_vn = descomponer_vendedor(v_admin)
             u_vn = {'_codigo_pdv': cod_vn, '_nombre_norm': nom_vn}
         elif is_admin and v_admin and v_admin != "GLOBAL":
@@ -941,6 +1012,9 @@ def dashboard(df_v_all, df_p, usuario_row):
     if is_super_admin:
         tab1, tab2, tab3, tab4 = st.tabs(["📈 Scorecard", "📊 Detalle", "🚀 Envío Masivo", "🛡️ Auditoría"])
         tab3_enabled = True; tab4_enabled = True
+    elif is_supervisor:
+        tab1, tab2 = st.tabs(["📈 Scorecard Zona", "📊 Detalle Zona"])
+        tab3 = tab4 = None; tab3_enabled = False; tab4_enabled = False
     elif is_admin:
         tab1, tab2 = st.tabs(["📈 Scorecard", "📊 Detalle"])
         tab3 = tab4 = None; tab3_enabled = False; tab4_enabled = False
