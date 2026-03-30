@@ -1010,16 +1010,16 @@ def dashboard(df_v_all, df_p, usuario_row):
     st.markdown("<br>", unsafe_allow_html=True)
 
     if is_super_admin:
-        tab1, tab2, tab3, tab4 = st.tabs(["📈 Scorecard", "📊 Detalle", "🚀 Envío Masivo", "🛡️ Auditoría"])
+        tab1, tab2, tab_analisis, tab3, tab4 = st.tabs(["📈 Scorecard", "📊 Detalle", "📦 Análisis", "🚀 Envío Masivo", "🛡️ Auditoría"])
         tab3_enabled = True; tab4_enabled = True
     elif is_supervisor:
-        tab1, tab2 = st.tabs(["📈 Scorecard Zona", "📊 Detalle Zona"])
+        tab1, tab2, tab_analisis = st.tabs(["📈 Scorecard Zona", "📊 Detalle Zona", "📦 Análisis"])
         tab3 = tab4 = None; tab3_enabled = False; tab4_enabled = False
     elif is_admin:
-        tab1, tab2 = st.tabs(["📈 Scorecard", "📊 Detalle"])
+        tab1, tab2, tab_analisis = st.tabs(["📈 Scorecard", "📊 Detalle", "📦 Análisis"])
         tab3 = tab4 = None; tab3_enabled = False; tab4_enabled = False
     else:
-        tab1, tab2 = st.tabs(["📈 Mi Scorecard", "📊 Mi Detalle"])
+        tab1, tab2, tab_analisis = st.tabs(["📈 Mi Scorecard", "📊 Mi Detalle", "📦 Análisis"])
         tab3 = tab4 = None; tab3_enabled = False; tab4_enabled = False
 
     with tab1:
@@ -1111,6 +1111,103 @@ def dashboard(df_v_all, df_p, usuario_row):
         cols_show = [c for c in ['Fecha', 'Cliente', 'Marca', 'Proveedor', 'Total', '_codigo_pdv'] if c in df_final.columns]
         if cols_show:
             st.dataframe(df_final[cols_show].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True, height=320)
+
+    with tab_analisis:
+        st.markdown("### 📦 Análisis por Proveedor / Marca")
+        if df_final.empty:
+            st.warning("⚠️ Sin datos para el período seleccionado.")
+        else:
+            _dark = dict(paper_bgcolor='#111827', plot_bgcolor='#111827', font_color='#E2E8F0')
+            # ── Controles ────────────────────────────────────────────────
+            ctl1, ctl2 = st.columns([1, 2])
+            with ctl1:
+                modo_analisis = st.radio("Agrupar por", ["Proveedor", "Marca"], horizontal=True, key="analisis_modo")
+            dim_col = modo_analisis  # 'Proveedor' o 'Marca'
+            with ctl2:
+                # Filtro por vendedor (sólo admins/super_admin ven todos; vendedor sólo ve el suyo)
+                if (is_super_admin or is_admin or is_supervisor) and 'Vendedor' in df_final.columns:
+                    vends_opt = ["Todos"] + sorted(df_final['Vendedor'].dropna().unique().tolist())
+                    vend_sel = st.selectbox("Filtrar vendedor", vends_opt, key="analisis_vendedor")
+                else:
+                    vend_sel = "Todos"
+
+            # ── Aplicar filtro de vendedor ────────────────────────────────
+            df_a = df_final.copy()
+            if vend_sel != "Todos" and 'Vendedor' in df_a.columns:
+                df_a = df_a[df_a['Vendedor'] == vend_sel]
+
+            if dim_col not in df_a.columns or 'Total' not in df_a.columns:
+                st.info(f"ℹ️ La columna '{dim_col}' no está disponible en los datos actuales.")
+            else:
+                df_a[dim_col] = df_a[dim_col].fillna("Sin asignar")
+                df_dim = df_a.groupby(dim_col)['Total'].sum().reset_index().sort_values('Total', ascending=False)
+
+                # ── KPIs ──────────────────────────────────────────────────
+                total_periodo = df_a['Total'].sum()
+                n_dim = df_dim[dim_col].nunique()
+                top_dim = df_dim.iloc[0][dim_col] if not df_dim.empty else "—"
+                top_val = df_dim.iloc[0]['Total'] if not df_dim.empty else 0
+                k1, k2, k3 = st.columns(3)
+                kpi_card(k1, total_periodo, f"Total {m_sel}", f"{n_dim} {modo_analisis}s", "#3B82F6")
+                kpi_card(k2, n_dim, f"{modo_analisis}s activos", "con ventas", "#10B981", prefix="")
+                kpi_card(k3, top_val, f"Top {modo_analisis}", top_dim[:30], "#F59E0B")
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # ── Gráficos ──────────────────────────────────────────────
+                gc1, gc2 = st.columns([1, 1])
+                with gc1:
+                    st.markdown(f"<div class='section-title'>🏆 Top 10 {modo_analisis}s</div>", unsafe_allow_html=True)
+                    top10 = df_dim.head(10).sort_values('Total')
+                    fig_bar = px.bar(
+                        top10, x='Total', y=dim_col, orientation='h',
+                        color='Total', color_continuous_scale='Blues',
+                        text=top10['Total'].apply(lambda x: f"${x:,.0f}")
+                    )
+                    fig_bar.update_layout(**_dark, showlegend=False, coloraxis_showscale=False,
+                                         margin=dict(t=10, b=10, l=10, r=80),
+                                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, color='#E2E8F0'),
+                                         yaxis=dict(showgrid=False, color='#E2E8F0', tickfont=dict(color='#E2E8F0', size=11)))
+                    fig_bar.update_traces(textposition='outside', textfont=dict(color='#E2E8F0', size=11), marker_line_width=0)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+
+                with gc2:
+                    st.markdown(f"<div class='section-title'>🗺️ Distribución por {modo_analisis}</div>", unsafe_allow_html=True)
+                    fig_tree = px.treemap(
+                        df_dim, path=[dim_col], values='Total',
+                        color='Total', color_continuous_scale='Blues'
+                    )
+                    fig_tree.update_layout(**_dark, margin=dict(t=10, b=10, l=10, r=10), coloraxis_showscale=False)
+                    fig_tree.update_traces(textfont=dict(color='#FFFFFF', size=12))
+                    st.plotly_chart(fig_tree, use_container_width=True)
+
+                # ── Tendencia ─────────────────────────────────────────────
+                if 'Fecha' in df_a.columns:
+                    st.markdown(f"<div class='section-title'>📅 Tendencia diaria — Top 5 {modo_analisis}s</div>", unsafe_allow_html=True)
+                    top5_dims = df_dim.head(5)[dim_col].tolist()
+                    df_trend = df_a[df_a[dim_col].isin(top5_dims)].copy()
+                    df_trend['Fecha'] = pd.to_datetime(df_trend['Fecha'], errors='coerce')
+                    df_trend = df_trend.dropna(subset=['Fecha'])
+                    df_trend = df_trend.groupby(['Fecha', dim_col])['Total'].sum().reset_index()
+                    if not df_trend.empty:
+                        fig_line = px.line(
+                            df_trend, x='Fecha', y='Total', color=dim_col,
+                            markers=True, color_discrete_sequence=px.colors.qualitative.Bold
+                        )
+                        fig_line.update_layout(**_dark, margin=dict(t=10, b=10, l=10, r=10),
+                                              legend=dict(font=dict(color='#E2E8F0')),
+                                              xaxis=dict(color='#E2E8F0', showgrid=False),
+                                              yaxis=dict(color='#E2E8F0', showgrid=True, gridcolor='#1F2937'))
+                        st.plotly_chart(fig_line, use_container_width=True)
+
+                # ── Tabla detalle ─────────────────────────────────────────
+                st.markdown(f"<div class='section-title'>📋 Detalle por {modo_analisis}</div>", unsafe_allow_html=True)
+                filtro_busq = st.text_input(f"🔍 Buscar {modo_analisis}", key="analisis_busqueda", placeholder=f"Escriba para filtrar...")
+                df_tabla = df_dim.copy()
+                if filtro_busq:
+                    df_tabla = df_tabla[df_tabla[dim_col].str.contains(filtro_busq, case=False, na=False)]
+                df_tabla['% del Total'] = (df_tabla['Total'] / total_periodo * 100).round(1).astype(str) + '%'
+                df_tabla['Total'] = df_tabla['Total'].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(df_tabla.reset_index(drop=True), use_container_width=True, hide_index=True, height=350)
 
     if tab3_enabled and tab3:
         with tab3:
