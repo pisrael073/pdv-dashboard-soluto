@@ -1160,11 +1160,12 @@ def dashboard(df_v_all, df_p, usuario_row):
                     top10 = df_dim.head(10).sort_values('Total')
                     fig_bar = px.bar(
                         top10, x='Total', y=dim_col, orientation='h',
-                        color='Total', color_continuous_scale='Blues',
+                        color=dim_col,
+                        color_discrete_sequence=['#1D4ED8','#065F46','#92400E','#6B21A8','#BE123C','#0E7490','#166534','#9A3412','#1E3A5F','#3B0764'],
                         text=top10['Total'].apply(lambda x: f"${x:,.0f}")
                     )
-                    fig_bar.update_layout(**_dark, showlegend=False, coloraxis_showscale=False,
-                                         margin=dict(t=10, b=10, l=10, r=80),
+                    fig_bar.update_layout(**_dark, showlegend=False,
+                                         margin=dict(t=10, b=10, l=10, r=90),
                                          xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, color='#E2E8F0'),
                                          yaxis=dict(showgrid=False, color='#E2E8F0', tickfont=dict(color='#E2E8F0', size=11)))
                     fig_bar.update_traces(textposition='outside', textfont=dict(color='#E2E8F0', size=11), marker_line_width=0)
@@ -1174,10 +1175,11 @@ def dashboard(df_v_all, df_p, usuario_row):
                     st.markdown(f"<div class='section-title'>🗺️ Distribución por {modo_analisis}</div>", unsafe_allow_html=True)
                     fig_tree = px.treemap(
                         df_dim, path=[dim_col], values='Total',
-                        color='Total', color_continuous_scale='Blues'
+                        color=dim_col,
+                        color_discrete_sequence=['#1D4ED8','#065F46','#92400E','#6B21A8','#BE123C','#0E7490','#166534','#9A3412','#1E3A5F','#3B0764']
                     )
-                    fig_tree.update_layout(**_dark, margin=dict(t=10, b=10, l=10, r=10), coloraxis_showscale=False)
-                    fig_tree.update_traces(textfont=dict(color='#FFFFFF', size=12))
+                    fig_tree.update_layout(**_dark, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
+                    fig_tree.update_traces(textfont=dict(color='#FFFFFF', size=13), textinfo='label+value+percent root')
                     st.plotly_chart(fig_tree, use_container_width=True)
 
                 # ── Tendencia ─────────────────────────────────────────────
