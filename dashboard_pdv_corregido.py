@@ -1147,8 +1147,7 @@ def dashboard(df_v_all, df_p, usuario_row):
                 n_dim = df_dim[dim_col].nunique()
                 top_dim = df_dim.iloc[0][dim_col] if not df_dim.empty else "—"
                 top_val = df_dim.iloc[0]['Total'] if not df_dim.empty else 0
-                k1, k2, k3 = st.columns(3)
-                kpi_card(k1, total_periodo, f"Total {m_sel}", f"{n_dim} {modo_analisis}s", "#3B82F6")
+                k2, k3 = st.columns(2)
                 kpi_card(k2, n_dim, f"{modo_analisis}s activos", "con ventas", "#10B981", prefix="")
                 kpi_card(k3, top_val, f"Top {modo_analisis}", top_dim[:30], "#F59E0B")
                 st.markdown("<br>", unsafe_allow_html=True)
