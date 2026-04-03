@@ -657,6 +657,56 @@ def cargar_ventas_netas():
     return df
 
 
+@st.cache_data(ttl=300)
+def cargar_ventas_netas_para_mes(mes_str):
+    """
+    mes_str: 'YYYY-MM'  ej: '2025-03'
+    - Mes actual  → lee VENTAS_NETAS (live)
+    - Mes pasado  → lee VENTAS_NETAS_HIST filtrado por mes_str
+    """
+    mes_actual = datetime.now().strftime("%Y-%m")
+    if mes_str == mes_actual:
+        return cargar_ventas_netas()
+    try:
+        gc = get_gc()
+        sh = gc.open("soluto")
+        ws = sh.worksheet("VENTAS_NETAS_HIST")
+        datos = ws.get_all_values()
+        if not datos or len(datos) < 2:
+            return pd.DataFrame()
+        df = pd.DataFrame(datos[1:], columns=datos[0])
+        df = limpiar_columnas(df)
+        if 'Mes' not in df.columns:
+            return pd.DataFrame()
+        df = df[df['Mes'] == mes_str].drop(columns=['Mes']).reset_index(drop=True)
+        def find_col(df, keyword):
+            return next((c for c in df.columns if keyword in norm_txt(c)), None)
+        col_subt = find_col(df, 'SUBT RL')
+        col_cli  = find_col(df, 'CLI')
+        col_nc   = find_col(df, 'NC. TOTAL') or find_col(df, 'NC TOTAL')
+        col_vend = find_col(df, 'VENDEDOR')
+        if col_vend:
+            df['Vendedor'] = df[col_vend].astype(str).str.strip()
+        if col_subt:
+            df['SubT_RL'] = pd.to_numeric(df[col_subt].astype(str).str.replace(r'[$,\s]', '', regex=True), errors='coerce').fillna(0)
+        else:
+            df['SubT_RL'] = 0
+        if col_cli:
+            df['Num_Cli'] = pd.to_numeric(df[col_cli].astype(str).str.replace(r'[$,\s]', '', regex=True), errors='coerce').fillna(0).astype(int)
+        else:
+            df['Num_Cli'] = 0
+        if col_nc:
+            df['NC_Total'] = pd.to_numeric(df[col_nc].astype(str).str.replace(r'[$,\s]', '', regex=True), errors='coerce').fillna(0)
+        else:
+            df['NC_Total'] = 0
+        descomp = df['Vendedor'].apply(descomponer_vendedor)
+        df['_codigo_pdv']  = descomp.apply(lambda x: x[0])
+        df['_nombre_vend'] = descomp.apply(lambda x: x[1])
+        return df
+    except Exception:
+        return cargar_ventas_netas()
+
+
 def filtrar_ventas_usuario(df_v, u):
     codigo = str(u.get('_codigo_pdv', '')).strip().upper()
     nombre = str(u.get('_nombre_norm', '')).strip().upper()
@@ -939,8 +989,19 @@ def dashboard(df_v_all, df_p, usuario_row):
 
     # ══════════════════════════════════════════════════════════════
     #  ✅ KPIs DESDE VENTAS_NETAS (SubT RL., # Cli., NC. Total)
+    #  Mes actual → VENTAS_NETAS (live) | Mes cerrado → VENTAS_NETAS_HIST
     # ══════════════════════════════════════════════════════════════
-    df_vn = cargar_ventas_netas()
+    try:
+        _meses_es = {'enero':'01','febrero':'02','marzo':'03','abril':'04','mayo':'05',
+                     'junio':'06','julio':'07','agosto':'08','septiembre':'09',
+                     'octubre':'10','noviembre':'11','diciembre':'12'}
+        _partes = m_sel.lower().split()
+        _mes_num = _meses_es.get(_partes[0], datetime.now().strftime('%m'))
+        _anio = _partes[1] if len(_partes) > 1 else str(datetime.now().year)
+        mes_str_sel = f"{_anio}-{_mes_num}"
+    except Exception:
+        mes_str_sel = datetime.now().strftime("%Y-%m")
+    df_vn = cargar_ventas_netas_para_mes(mes_str_sel)
 
     if nombre_rep == "GLOBAL":
         if not df_vn.empty:
