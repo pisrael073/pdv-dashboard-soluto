@@ -992,11 +992,16 @@ def dashboard(df_v_all, df_p, usuario_row):
     #  Mes actual → VENTAS_NETAS (live) | Mes cerrado → VENTAS_NETAS_HIST
     # ══════════════════════════════════════════════════════════════
     try:
-        _meses_es = {'enero':'01','febrero':'02','marzo':'03','abril':'04','mayo':'05',
-                     'junio':'06','julio':'07','agosto':'08','septiembre':'09',
-                     'octubre':'10','noviembre':'11','diciembre':'12'}
+        _meses = {
+            'enero':'01','febrero':'02','marzo':'03','abril':'04','mayo':'05',
+            'junio':'06','julio':'07','agosto':'08','septiembre':'09',
+            'octubre':'10','noviembre':'11','diciembre':'12',
+            'january':'01','february':'02','march':'03','april':'04','may':'05',
+            'june':'06','july':'07','august':'08','september':'09',
+            'october':'10','november':'11','december':'12',
+        }
         _partes = m_sel.lower().split()
-        _mes_num = _meses_es.get(_partes[0], datetime.now().strftime('%m'))
+        _mes_num = _meses.get(_partes[0], datetime.now().strftime('%m'))
         _anio = _partes[1] if len(_partes) > 1 else str(datetime.now().year)
         mes_str_sel = f"{_anio}-{_mes_num}"
     except Exception:
