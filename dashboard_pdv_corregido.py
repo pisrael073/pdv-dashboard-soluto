@@ -31,19 +31,30 @@ ZONA_COLOR = {'ORIENTE': '#FF6B35', 'SIERRA': '#1E88E5'}
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _gc():
+    # Debug: mostrar claves disponibles
+    st.write(f"🔍 Claves en st.secrets: {list(st.secrets.keys())}")
+
     try:
-        # Streamlit Cloud: usar secrets [google]
+        # Streamlit Cloud: intentar con sección [google]
         if "google" in st.secrets:
+            st.write("✅ Encontré sección [google]")
             creds_dict = {k: st.secrets.google[k] for k in st.secrets.google}
             return gspread.service_account(info=creds_dict)
-    except:
-        pass
+
+        # Si no hay [google], intentar acceder directo
+        if "type" in st.secrets:
+            st.write("✅ Encontré 'type' en raíz de secrets")
+            creds_dict = {k: st.secrets[k] for k in st.secrets}
+            return gspread.service_account(info=creds_dict)
+    except Exception as e:
+        st.write(f"⚠️ Error con Secrets: {e}")
 
     # Local: usar archivo credenciales.json
     try:
+        st.write(f"📁 Intentando con archivo: {CREDS_PATH}")
         return gspread.service_account(filename=str(CREDS_PATH))
-    except:
-        st.error("❌ No se encontró credenciales: ni Secrets en Streamlit Cloud ni credenciales.json")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
         return None
 
 
