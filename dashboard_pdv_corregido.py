@@ -42,19 +42,24 @@ def _gc():
     """Conectar a Google Sheets con manejo robusto de errores"""
     try:
         # Intentar con Secrets primero (Streamlit Cloud)
-        if "type" in st.secrets:
-            st.write('📍 Usando Secrets de Streamlit Cloud')
-            creds_dict = {key: st.secrets[key] for key in st.secrets}
-            return gspread.service_account(info=creds_dict)
+        try:
+            if len(st.secrets) > 0 and "type" in st.secrets:
+                st.write('📍 Usando Secrets de Streamlit Cloud')
+                creds_dict = {key: st.secrets[key] for key in st.secrets}
+                return gspread.service_account(info=creds_dict)
+        except Exception as secrets_err:
+            st.write(f'ℹ️ Secrets no disponibles: {secrets_err}')
+
         # Si no, intentar con archivo local
-        elif CREDS_PATH.exists():
+        if CREDS_PATH.exists():
             st.write('📍 Usando credenciales.json local')
             return gspread.service_account(filename=str(CREDS_PATH))
-        else:
-            st.error('❌ NO SE ENCONTRÓ CREDENCIALES:')
-            st.write('  - No hay credenciales.json en el directorio')
-            st.write('  - No hay Secrets configurados en Streamlit Cloud')
-            return None
+
+        # Si nada funcionó
+        st.error('❌ NO SE ENCONTRÓ CREDENCIALES:')
+        st.write('  - No hay credenciales.json en el directorio')
+        st.write('  - No hay Secrets configurados en Streamlit Cloud')
+        return None
     except Exception as e:
         st.error(f'❌ Error autenticando con Google: {e}')
         return None
