@@ -5,13 +5,6 @@ Sheets "soluto":
   - VENTAS_NETAS → Vendedor | SubT RL. | # Cli.
   - VENTAS       → Vendedor | Cliente | Fecha | Marca | Grupo ...
 Join por código PDV (PDV01, PDV02 …) — robusto ante diferencias de formato.
-
-MEJORAS v2.0:
-✅ Gráfico dual treemap: Ventas vs DN en el mismo panel
-✅ Mismo color en ambos treemaps para comparación visual
-✅ Cuenta clientes únicos por marca
-✅ Top 10 marcas (antes era 8)
-✅ Mejor hover con información detallada
 """
 
 import re
@@ -29,40 +22,16 @@ from pathlib import Path
 # ─── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 BASE_DIR         = Path(__file__).parent
 CREDS_PATH       = BASE_DIR / 'credenciales.json'
-TELEGRAM_TOKEN   = st.secrets.get('TELEGRAM_TOKEN', '')
-TELEGRAM_CHAT_ID = st.secrets.get('TELEGRAM_CHAT_ID', '')
+TELEGRAM_TOKEN   = os.getenv('TELEGRAM_TOKEN', '')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 
 ZONA_COLOR = {'ORIENTE': '#FF6B35', 'SIERRA': '#1E88E5'}
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-@st.cache_resource
 def _gc():
-    """Conectar a Google Sheets con manejo robusto de errores"""
-    try:
-        # Intentar con Secrets primero (Streamlit Cloud)
-        try:
-            if len(st.secrets) > 0 and "type" in st.secrets:
-                st.write('📍 Usando Secrets de Streamlit Cloud')
-                creds_dict = {key: st.secrets[key] for key in st.secrets}
-                return gspread.service_account(info=creds_dict)
-        except Exception as secrets_err:
-            st.write(f'ℹ️ Secrets no disponibles: {secrets_err}')
-
-        # Si no, intentar con archivo local
-        if CREDS_PATH.exists():
-            st.write('📍 Usando credenciales.json local')
-            return gspread.service_account(filename=str(CREDS_PATH))
-
-        # Si nada funcionó
-        st.error('❌ NO SE ENCONTRÓ CREDENCIALES:')
-        st.write('  - No hay credenciales.json en el directorio')
-        st.write('  - No hay Secrets configurados en Streamlit Cloud')
-        return None
-    except Exception as e:
-        st.error(f'❌ Error autenticando con Google: {e}')
-        return None
+    return gspread.service_account(filename=str(CREDS_PATH))
 
 
 def _extraer_pdv(texto: str) -> str:
@@ -103,22 +72,13 @@ def emoji_c(pct: float) -> str:
 def cargar_presupuesto() -> pd.DataFrame:
     """
     Hoja PRESUPUESTO → VENDEDOR | # OBJETIVO DN | # PRESUPUESTO | zona
+    Usa get_all_records() para que gspread devuelva números como int/float
+    y evitar problemas de formato (comas, puntos de miles, etc.).
     """
     gc = _gc()
-    if gc is None:
-        st.error('❌ No se pudo conectar a Google Sheets')
-        return pd.DataFrame()
+    ws = gc.open('soluto').worksheet('PRESUPUESTO')
 
-    try:
-        ws = gc.open('soluto').worksheet('PRESUPUESTO')
-    except Exception as e:
-        st.error(f'❌ Error abriendo hoja PRESUPUESTO: {e}')
-        st.write('Verifica que:')
-        st.write('  1. El Google Sheet se llama "soluto"')
-        st.write('  2. Existe una hoja llamada "PRESUPUESTO"')
-        st.write('  3. El SERVICE ACCOUNT tiene acceso al sheet')
-        return pd.DataFrame()
-
+    # get_all_values devuelve siempre strings — control total sobre conversión
     raw = ws.get_all_values()
     if not raw:
         return pd.DataFrame()
@@ -149,13 +109,18 @@ def cargar_presupuesto() -> pd.DataFrame:
     if col_zona: rename[col_zona] = 'ZONA'
     df = df.rename(columns=rename)
 
+    # Conversión numérica robusta para valores de MONEDA de Google Sheets.
+    # Google Sheets formato moneda devuelve: "$55,000.00" → necesitamos 55000
+    # re.sub(r'\D','') daría "5500000" (incorrecto) porque toma los ".00" como dígitos.
+    # Solución: eliminar la parte decimal ANTES de quitar no-dígitos.
     def _solo_digitos(val):
         if isinstance(val, (int, float)):
-            return float(int(val))
+            return float(int(val))        # 55000.0 → 55000
         s = str(val).strip()
-        s = re.sub(r'[$\s]', '', s)
-        s = re.sub(r'[.,]\d{1,2}$', '', s)
-        digits = re.sub(r'\D', '', s)
+        s = re.sub(r'[$\s]', '', s)       # quitar $ y espacios → "55,000.00"
+        # Detectar y eliminar parte decimal (,XX o .XX al final)
+        s = re.sub(r'[.,]\d{1,2}$', '', s)  # "55,000.00"→"55,000" | "55.000,00"→"55.000"
+        digits = re.sub(r'\D', '', s)         # quitar todo no-dígito → "55000"
         return float(digits) if digits else 0.0
 
     for c in ['META_DN', 'META_V']:
@@ -181,15 +146,8 @@ def cargar_ventas_netas() -> pd.DataFrame:
     Solo filas con código PDV válido.
     """
     gc = _gc()
-    if gc is None:
-        return pd.DataFrame()
-
-    try:
-        ws = gc.open('soluto').worksheet('VENTAS_NETAS')
-        raw = ws.get_all_values()
-    except Exception as e:
-        st.error(f'❌ Error abriendo VENTAS_NETAS: {e}')
-        return pd.DataFrame()
+    ws = gc.open('soluto').worksheet('VENTAS_NETAS')
+    raw = ws.get_all_values()
 
     if not raw:
         return pd.DataFrame()
@@ -197,6 +155,7 @@ def cargar_ventas_netas() -> pd.DataFrame:
     headers = [str(h).strip() for h in raw[0]]
     df = pd.DataFrame(raw[1:], columns=headers)
 
+    # Encontrar columnas clave
     def _find(keywords):
         for c in df.columns:
             cu = c.upper()
@@ -209,6 +168,7 @@ def cargar_ventas_netas() -> pd.DataFrame:
     col_cli  = _find(['CLI'])
 
     if not col_vend:
+        # intentar col A como vendedor
         col_vend = headers[0]
 
     if not col_sub:
@@ -225,12 +185,14 @@ def cargar_ventas_netas() -> pd.DataFrame:
 
     df['VENDEDOR'] = df['VENDEDOR'].astype(str).str.strip()
 
+    # Extraer clave PDV — solo conservar filas con código PDV válido
     df['KEY_PDV'] = df['VENDEDOR'].apply(_extraer_pdv)
     df = df[df['KEY_PDV'] != ''].copy()
 
+    # Si hay filas duplicadas del mismo PDV, sumarlas
     agg = {'SubT_RL': 'sum'}
     if 'DN_CLI' in df.columns:
-        agg['DN_CLI'] = 'max'
+        agg['DN_CLI'] = 'max'   # # Cli. ya es acumulado por vendedor
     df = df.groupby('KEY_PDV', as_index=False).agg(agg)
 
     return df.reset_index(drop=True)
@@ -240,15 +202,8 @@ def cargar_ventas_netas() -> pd.DataFrame:
 def cargar_ventas_detalle() -> pd.DataFrame:
     """Hoja VENTAS: detalle por transacción para gráfico de marcas."""
     gc = _gc()
-    if gc is None:
-        return pd.DataFrame()
-
-    try:
-        ws = gc.open('soluto').worksheet('VENTAS')
-        raw = ws.get_all_values()
-    except Exception as e:
-        st.error(f'❌ Error abriendo VENTAS: {e}')
-        return pd.DataFrame()
+    ws = gc.open('soluto').worksheet('VENTAS')
+    raw = ws.get_all_values()
     if not raw:
         return pd.DataFrame()
 
@@ -287,6 +242,7 @@ def construir_tabla(df_pres: pd.DataFrame,
     dia      = hoy.day
     dias_mes = calendar.monthrange(hoy.year, hoy.month)[1]
 
+    # Join por KEY_PDV
     tabla = df_pres.copy()
     tabla = tabla.merge(
         df_vn[['KEY_PDV', 'SubT_RL'] + (['DN_CLI'] if 'DN_CLI' in df_vn.columns else [])],
@@ -296,9 +252,11 @@ def construir_tabla(df_pres: pd.DataFrame,
     tabla['VENTA_REAL'] = pd.to_numeric(tabla.get('SubT_RL', 0), errors='coerce').fillna(0)
     tabla['DN_REAL']    = pd.to_numeric(tabla.get('DN_CLI',  0), errors='coerce').fillna(0)
 
+    # Proyección: al ritmo actual, ¿cuánto llegarán al fin de mes?
     tabla['PROY_V']  = (tabla['VENTA_REAL'] / dia * dias_mes).round(0)
     tabla['PROY_DN'] = (tabla['DN_REAL']    / dia * dias_mes).round(0)
 
+    # Avance % vs META MES COMPLETA (no proporcional — esto es lo que ve el usuario)
     tabla['CUMP_V']    = tabla.apply(lambda r: cump(r['VENTA_REAL'], r['META_V']),  axis=1)
     tabla['CUMP_DN']   = tabla.apply(lambda r: cump(r['DN_REAL'],    r['META_DN']), axis=1)
     tabla['CUMP_PROY_V']  = tabla.apply(lambda r: cump(r['PROY_V'],  r['META_V']),  axis=1)
@@ -308,6 +266,8 @@ def construir_tabla(df_pres: pd.DataFrame,
 
 
 # ─── GRÁFICOS ─────────────────────────────────────────────────────────────────
+
+# ─── 3 ESTILOS DE GRÁFICO ─────────────────────────────────────────────────────
 
 def _dark(fig, height, ml=190, mr=30):
     fig.update_layout(
@@ -325,6 +285,7 @@ def _base_layout(fig, height, left_margin):
     return _dark(fig, height, ml=left_margin, mr=30)
 
 
+# ══ ESTILO A — Barras verticales limpias: Real coloreado + Meta como línea ════
 def estilo_A(df_z: pd.DataFrame, titulo: str,
              col_v: str, col_m: str, col_p: str, col_c: str, es_dinero=True) -> go.Figure:
     fmt  = (lambda v: f'${v:,.0f}') if es_dinero else (lambda v: f'{v:.0f}')
@@ -332,6 +293,7 @@ def estilo_A(df_z: pd.DataFrame, titulo: str,
     n    = len(noms)
     fig  = go.Figure()
 
+    # 1. Barra Real (coloreada por cumplimiento)
     fig.add_bar(
         name='Real',
         x=noms, y=df_z[col_v],
@@ -344,6 +306,7 @@ def estilo_A(df_z: pd.DataFrame, titulo: str,
                       '<extra></extra>',
     )
 
+    # 2. Línea de Meta (scatter con markers horizontales — no barra)
     fig.add_scatter(
         name='Meta',
         x=noms, y=df_z[col_m],
@@ -356,6 +319,7 @@ def estilo_A(df_z: pd.DataFrame, titulo: str,
         hovertemplate='Meta: ' + ('$%{y:,.0f}' if es_dinero else '%{y:.0f}') + '<extra></extra>',
     )
 
+    # 3. Diamante de Proyección
     col_proy = ['#22c55e' if p >= 100 else '#f59e0b' if p >= 80 else '#ef4444'
                 for p in df_z[col_c]]
     fig.add_scatter(
@@ -394,6 +358,7 @@ def estilo_A(df_z: pd.DataFrame, titulo: str,
     return _dark(fig, max(380, n * 52 + 120), ml=55, mr=40)
 
 
+# ══ ESTILO B — Barras horizontales con $ en el eje (limpio, nombres completos) ═
 def estilo_B(df_z: pd.DataFrame, titulo: str,
              col_v: str, col_m: str, col_p: str, col_c: str, es_dinero=True) -> go.Figure:
     fmt = (lambda v: f'${v:,.0f}') if es_dinero else (lambda v: f'{v:.0f}')
@@ -401,11 +366,13 @@ def estilo_B(df_z: pd.DataFrame, titulo: str,
     h   = max(340, n * 50 + 90)
     nombres = df_z['NOMBRE'].tolist()
     fig = go.Figure()
+    # Barra fondo = meta
     fig.add_bar(
         name='🎯 Meta', y=nombres, x=df_z[col_m], orientation='h',
         marker=dict(color='rgba(255,255,255,0.05)', line=dict(color='#334155', width=1)),
         hovertemplate='Meta: %{x:,.0f}<extra></extra>',
     )
+    # Barra real
     fig.add_bar(
         name='✅ Real', y=nombres, x=df_z[col_v], orientation='h',
         marker=dict(color=[color_c(p) for p in df_z[col_c]], opacity=0.88),
@@ -413,6 +380,7 @@ def estilo_B(df_z: pd.DataFrame, titulo: str,
         textposition='inside', textfont=dict(size=10.5, color='white'),
         hovertemplate='Real: %{x:,.0f}<extra></extra>',
     )
+    # Marcador proyección
     fig.add_scatter(
         name='📈 Proyección', y=nombres, x=df_z[col_p],
         mode='markers+text',
@@ -432,19 +400,21 @@ def estilo_B(df_z: pd.DataFrame, titulo: str,
     return _dark(fig, h, ml=max(180, df_z['NOMBRE'].str.len().max()*7), mr=120)
 
 
+# ══ ESTILO C — Tarjetas estilo PriceScout con ranking ════════════════════════════
 def estilo_C(df_z: pd.DataFrame, titulo: str,
              col_v: str, col_m: str, col_p: str, col_c: str,
              col_cp: str, es_dinero=True):
     fmt = (lambda v: f'${v:,.0f}') if es_dinero else (lambda v: f'{int(v)}')
     df_sorted = df_z.sort_values(col_cp, ascending=False).reset_index(drop=True)
 
+    # Colores inspirados en PriceScout
     GRUPOS = [
         ('🚀 En camino',  df_sorted[df_sorted[col_cp] >= 100],
-         '#34d399', '#052e16', '#d1fae5'),
+         '#34d399', '#052e16', '#d1fae5'),          # verde esmeralda
         ('⚠️ En riesgo',  df_sorted[(df_sorted[col_cp] >= 80) & (df_sorted[col_cp] < 100)],
-         '#fbbf24', '#1c1400', '#fef9c3'),
+         '#fbbf24', '#1c1400', '#fef9c3'),          # amarillo PriceScout
         ('🔴 Crítico',    df_sorted[df_sorted[col_cp] < 80],
-         '#f87171', '#1a0505', '#fee2e2'),
+         '#f87171', '#1a0505', '#fee2e2'),          # rojo suave
     ]
 
     st.markdown(
@@ -458,6 +428,7 @@ def estilo_C(df_z: pd.DataFrame, titulo: str,
         if df_g.empty:
             continue
 
+        # Encabezado de grupo — pill badge estilo PriceScout
         st.markdown(f"""
 <div style="display:inline-flex;align-items:center;gap:6px;
             background:{bg_card};border:1px solid {acento}40;
@@ -505,6 +476,7 @@ def estilo_C(df_z: pd.DataFrame, titulo: str,
 </div>""", unsafe_allow_html=True)
 
 
+# ══ PDF — Reporte descargable ════════════════════════════════════════════════════
 def generar_pdf(tabla: pd.DataFrame, mes_lbl: str) -> bytes:
     """Genera PDF con tarjetas de cumplimiento usando matplotlib."""
     try:
@@ -524,7 +496,7 @@ def generar_pdf(tabla: pd.DataFrame, mes_lbl: str) -> bytes:
                 df_z = tabla[tabla['ZONA'] == zona].sort_values('CUMP_PROY_V', ascending=False)
                 n = len(df_z)
                 cols_pdf = 4
-                rows_pdf = -(-n // cols_pdf)
+                rows_pdf = -(-n // cols_pdf)  # ceiling division
 
                 fig = plt.figure(figsize=(16, 3 + rows_pdf * 2.8), facecolor='#0d1117')
                 fig.suptitle(
@@ -551,11 +523,13 @@ def generar_pdf(tabla: pd.DataFrame, mes_lbl: str) -> bytes:
                     else:
                         c_borde, c_bg = '#ef4444', '#1f0808'
 
+                    # Fondo de tarjeta
                     rect = mpatches.FancyBboxPatch((0.02, 0.04), 0.96, 0.92,
                         boxstyle='round,pad=0.02', facecolor=c_bg,
                         edgecolor=c_borde, linewidth=1.5)
                     ax.add_patch(rect)
 
+                    # Barra de progreso
                     bw = min(pct / 100, 1.0) * 0.88
                     ax.add_patch(mpatches.Rectangle((0.06, 0.09), 0.88, 0.06,
                         facecolor='#1e2a3a', edgecolor='none'))
@@ -613,6 +587,7 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
     ─ Barra gris clarita = 100% (meta completa, referencia)
     ─ Barra coloreada    = % alcanzado real
     ─ Diamante           = % proyectado al cierre
+    Todo en % → fácil comparar entre vendedores con metas distintas.
     """
     n   = len(df_z)
     h   = max(320, n * 52 + 90)
@@ -622,8 +597,8 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
     reales_v = df_z[col_real].tolist()
     proy_v   = df_z[col_proy].tolist()
     meta_v   = df_z[col_meta].tolist()
-    pct_r    = df_z[col_cump].tolist()
-    pct_p    = df_z[col_cump_proy].tolist()
+    pct_r    = df_z[col_cump].tolist()      # % real vs meta mes
+    pct_p    = df_z[col_cump_proy].tolist() # % proyección vs meta mes
 
     col_r = [color_c(p) for p in pct_r]
     col_p = ['#22c55e' if p >= 100 else '#f59e0b' if p >= 80 else '#ef4444'
@@ -633,6 +608,7 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
 
     fig = go.Figure()
 
+    # ── Fondo 100% (meta) ─────────────────────────────────────────────
     fig.add_trace(go.Bar(
         name='🎯 Meta (100%)',
         y=nombres, x=[100] * n,
@@ -645,6 +621,7 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
         showlegend=True,
     ))
 
+    # ── Barra real (% de la meta) ─────────────────────────────────────
     hover_r = [
         f'<b>{nom}</b><br>'
         f'Real: <b>{fmt(rv)}</b>  ({pr:.1f}% de meta)<br>'
@@ -665,6 +642,7 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
         showlegend=True,
     ))
 
+    # ── Diamante proyección ───────────────────────────────────────────
     hover_p = [
         f'<b>{nom}</b><br>'
         f'Proyección: <b>{fmt(pv)}</b>  ({pp:.1f}%)<br>'
@@ -685,6 +663,7 @@ def _grafico_progreso(df_z: pd.DataFrame, zona: str,
         showlegend=True,
     ))
 
+    # ── Línea vertical en 100% ────────────────────────────────────────
     fig.add_vline(x=100, line_color='#ef4444', line_dash='dash',
                   line_width=1.5, opacity=0.7,
                   annotation_text='Meta', annotation_font_color='#ef4444',
@@ -722,10 +701,8 @@ def grafico_dn_zona(df_z: pd.DataFrame, zona: str) -> go.Figure:
 
 
 def grafico_marcas(df_vd: pd.DataFrame, key_pdv: str, nombre: str) -> go.Figure:
-    """Treemap dual: Distribución por Venta vs DN (clientes nuevos) — MEJORADO v2.0"""
     if df_vd.empty or 'Marca' not in df_vd.columns or 'KEY_PDV' not in df_vd.columns:
         return go.Figure()
-
     hoy = datetime.now()
     df  = df_vd[df_vd['KEY_PDV'] == key_pdv].copy()
     if 'Fecha' in df.columns:
@@ -735,6 +712,7 @@ def grafico_marcas(df_vd: pd.DataFrame, key_pdv: str, nombre: str) -> go.Figure:
 
     col = 'TotalFactura' if 'TotalFactura' in df.columns else None
 
+    # Agregar columna de clientes (contar filas por marca)
     agg_dict = {}
     if col:
         agg_dict[col] = 'sum'
@@ -758,6 +736,7 @@ def grafico_marcas(df_vd: pd.DataFrame, key_pdv: str, nombre: str) -> go.Figure:
         horizontal_spacing=0.05,
     )
 
+    # Treemap 1: Ventas
     if col:
         fig.add_trace(
             go.Treemap(
@@ -774,6 +753,7 @@ def grafico_marcas(df_vd: pd.DataFrame, key_pdv: str, nombre: str) -> go.Figure:
             row=1, col=1
         )
 
+    # Treemap 2: DN (Clientes)
     fig.add_trace(
         go.Treemap(
             labels=top['Marca'],
@@ -868,7 +848,7 @@ def _mensaje_telegram(tabla: pd.DataFrame, zona: str, mes_lbl: str) -> str:
         '<b>💰 VENTAS NETAS</b>  (Real → Meta Mes)',
     ]
     for _, r in df_z.iterrows():
-        em = emoji_c(r['CUMP_PROY_V'])
+        em = emoji_c(r['CUMP_PROY_V'])   # semáforo según proyección
         nb = str(r['NOMBRE'])[:20]
         lineas.append(
             f'{em} {nb}: <b>${r["VENTA_REAL"]:,.0f}</b> / ${r["META_V"]:,.0f}'
@@ -901,6 +881,9 @@ def pagina_presupuesto_cumplimiento():
     dias_mes = calendar.monthrange(hoy.year, hoy.month)[1]
     mes_lbl  = hoy.strftime('%B %Y').upper()
 
+    # ═════════════════════════════════════════════════════════════════════════════
+    # ESTILOS GLOBALES
+    # ═════════════════════════════════════════════════════════════════════════════
     st.set_page_config(
         page_title='PDV Sin Límites — Presupuesto vs Cumplimiento',
         page_icon='📊',
@@ -908,25 +891,21 @@ def pagina_presupuesto_cumplimiento():
         initial_sidebar_state='expanded',
     )
 
-    # ════ DEBUG MODE ════
-    with st.sidebar:
-        st.write('🔧 **DEBUG MODE**')
-        st.write(f'✅ Fecha: {hoy}')
-        st.write(f'✅ BASE_DIR: {BASE_DIR}')
-        st.write(f'✅ CREDS_PATH: {CREDS_PATH}')
-        st.write(f'✅ CREDS existe local: {CREDS_PATH.exists()}')
-        st.write(f'✅ Secrets disponibles: {"type" in st.secrets}')
-
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Poppins:wght@500;600;700;800&display=swap');
 
-    * { font-family: 'Inter', sans-serif; }
+    * {
+        font-family: 'Inter', sans-serif;
+    }
+
     h1, h2, h3 { font-family: 'Poppins', sans-serif; font-weight: 700; }
 
+    /* Main content padding */
     .main { padding: 2rem 2.5rem; }
     .block-container { padding-top: 1rem; padding-bottom: 1rem; max-width: 100%; }
 
+    /* Header principal */
     .header-principal {
         background: linear-gradient(135deg, #0f172a 0%, #1a2e4a 100%);
         padding: 2.5rem;
@@ -951,7 +930,13 @@ def pagina_presupuesto_cumplimiento():
         text-transform: uppercase;
     }
 
-    .kpi-container { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    /* KPI Cards */
+    .kpi-container {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
 
     .kpi-card {
         background: linear-gradient(135deg, #1a2e4a 0%, #0f172a 100%);
@@ -990,6 +975,7 @@ def pagina_presupuesto_cumplimiento():
         font-weight: 500;
     }
 
+    /* Títulos de secciones */
     .section-title {
         color: #f1f5f9;
         font-size: 1.4rem;
@@ -1000,9 +986,18 @@ def pagina_presupuesto_cumplimiento():
         display: inline-block;
     }
 
-    .stRadio > label { font-family: 'Poppins', sans-serif; font-weight: 600; }
-    .dataframe { font-size: 0.9rem; }
+    /* Tabs y radio buttons */
+    .stRadio > label {
+        font-family: 'Poppins', sans-serif;
+        font-weight: 600;
+    }
 
+    /* DataFrames */
+    .dataframe {
+        font-size: 0.9rem;
+    }
+
+    /* Botones */
     .stButton > button {
         font-family: 'Poppins', sans-serif;
         font-weight: 600;
@@ -1016,6 +1011,7 @@ def pagina_presupuesto_cumplimiento():
         box-shadow: 0 6px 20px rgba(251, 191, 36, 0.3);
     }
 
+    /* Metric boxes */
     .metric-container {
         background: linear-gradient(135deg, #1a2e4a 0%, #0f172a 100%);
         border: 1px solid #334155;
@@ -1023,12 +1019,33 @@ def pagina_presupuesto_cumplimiento():
         padding: 1.2rem;
     }
 
-    hr { border: 0; height: 1px; background: linear-gradient(to right, transparent, #334155, transparent); margin: 2rem 0; }
-    .stAlert { border-radius: 10px; border-left: 4px solid #fbbf24 !important; }
-    .streamlit-expanderHeader { background-color: #1a2e4a; border: 1px solid #334155; border-radius: 8px; }
+    /* Dividers */
+    hr {
+        border: 0;
+        height: 1px;
+        background: linear-gradient(to right, transparent, #334155, transparent);
+        margin: 2rem 0;
+    }
+
+    /* Info, Warning, Error boxes */
+    .stAlert {
+        border-radius: 10px;
+        border-left: 4px solid #fbbf24 !important;
+    }
+
+    /* Expander */
+    .streamlit-expanderHeader {
+        background-color: #1a2e4a;
+        border: 1px solid #334155;
+        border-radius: 8px;
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
+    # ═════════════════════════════════════════════════════════════════════════════
+    # HEADER PRINCIPAL
+    # ═════════════════════════════════════════════════════════════════════════════
     st.markdown(f"""
     <div class="header-principal">
         <h1>📊 Presupuesto vs Cumplimiento</h1>
@@ -1038,35 +1055,21 @@ def pagina_presupuesto_cumplimiento():
     </div>
     """, unsafe_allow_html=True)
 
+    # Cargar datos con debug visible
     with st.spinner('Cargando desde Google Sheets...'):
         try:
-            st.write('🔄 Conectando a Google Sheets...')
             df_pres = cargar_presupuesto()
-            st.write(f'✅ PRESUPUESTO: {len(df_pres)} registros')
             df_vn   = cargar_ventas_netas()
-            st.write(f'✅ VENTAS_NETAS: {len(df_vn)} registros')
             df_vd   = cargar_ventas_detalle()
-            st.write(f'✅ VENTAS DETALLE: {len(df_vd)} registros')
         except Exception as e:
-            st.error(f'❌ Error conectando a Google Sheets:')
-            st.error(f'  {type(e).__name__}: {str(e)}')
-            st.info('**Soluciones:**')
-            st.write('1. Verifica que `credenciales.json` exista en el directorio')
-            st.write('2. Verifica que las hojas "PRESUPUESTO", "VENTAS_NETAS", "VENTAS" existan en el Google Sheet')
-            st.write('3. En Streamlit Cloud, agrega credenciales.json en Secrets')
+            st.error(f'Error conectando a Google Sheets: {e}')
             return
 
     if df_pres.empty:
-        st.error('❌ Sin datos en hoja PRESUPUESTO. Verifica:')
-        st.write('- Que existe una hoja llamada "PRESUPUESTO"')
-        st.write('- Que tiene columnas: VENDEDOR, PRESUPUESTO, OBJETIVO DN, ZONA')
-        st.write('- Que hay datos en esa hoja')
+        st.warning('Sin datos en hoja PRESUPUESTO.')
         return
 
-    if df_vn.empty:
-        st.warning('⚠️ Sin datos en VENTAS_NETAS')
-        return
-
+    # ── Debug SIEMPRE visible para verificar valores reales ───────────────────
     with st.expander('🔍 Verificar datos cargados (abre si los % son raros)', expanded=True):
         c1, c2 = st.columns(2)
         c1.markdown('**PRESUPUESTO — valores tal como llegan de Sheets**')
@@ -1078,6 +1081,7 @@ def pagina_presupuesto_cumplimiento():
     tabla = construir_tabla(df_pres, df_vn, df_vd)
     zonas = [z for z in ['SIERRA', 'ORIENTE'] if z in tabla['ZONA'].unique()]
 
+    # ── Selector de estilo de gráfico ─────────────────────────────────────────
     estilo = st.radio(
         '🎨 Estilo de gráfico — escoge el que prefieras:',
         options=[
@@ -1089,6 +1093,7 @@ def pagina_presupuesto_cumplimiento():
         key='estilo_grafico',
     )
 
+    # ── Métricas globales ──────────────────────────────────────────────────────
     st.markdown('<h2 class="section-title">🌍 Resumen Global</h2>', unsafe_allow_html=True)
     tv   = tabla['VENTA_REAL'].sum()
     mv   = tabla['META_V'].sum()
@@ -1144,11 +1149,13 @@ def pagina_presupuesto_cumplimiento():
 
     st.markdown('---')
 
+    # ── Por zona ───────────────────────────────────────────────────────────────
     for zona in zonas:
         df_z  = tabla[tabla['ZONA'] == zona].copy()
         emoji = '🌴' if zona == 'ORIENTE' else '🏔️'
         st.markdown(f'<h2 class="section-title">{emoji} Zona {zona}</h2>', unsafe_allow_html=True)
 
+        # KPIs de zona — siempre vs META MES COMPLETA
         vz   = df_z['VENTA_REAL'].sum()
         mvz  = df_z['META_V'].sum()
         pz   = df_z['PROY_V'].sum()
@@ -1203,111 +1210,12 @@ def pagina_presupuesto_cumplimiento():
             """, unsafe_allow_html=True)
 
         st.markdown('')
-
-        # ──── GRÁFICOS CON ESTILOS ────
-        st.markdown(f'<h3 style="color:#cbd5e1; margin-top:1.5rem; margin-bottom:1rem; font-size:1.1rem; font-weight:600;">📊 Gráficos de Desempeño — {zona}</h3>', unsafe_allow_html=True)
         _render_zona_graficos(df_z, zona, estilo)
-
-        # ──── TABLA DETALLADA ────
-        st.markdown('<h3 style="color:#cbd5e1; font-size:1rem; margin-top:2rem; margin-bottom:1rem; font-weight:600;">📋 Análisis por Vendedor</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 style="color:#cbd5e1; font-size:1rem; margin-top:2rem; margin-bottom:1rem; font-weight:600;">📊 Detalle de Vendedores</h3>', unsafe_allow_html=True)
         _tabla_zona(df_z)
-
-        # ──── GRÁFICO COMPARATIVO: VENTAS vs DN POR VENDEDOR ────
-        st.markdown(f'<h4 style="color:#94a3b8; font-size:0.9rem; margin-top:1.5rem; margin-bottom:0.8rem;">💰 Ventas vs 👥 DN — Comparación {zona}</h4>', unsafe_allow_html=True)
-
-        fig_venta_dn = make_subplots(
-            rows=1, cols=2,
-            subplot_titles=('💰 Venta Real $', '👥 Clientes Nuevos (DN)'),
-            specs=[[{'type': 'bar'}, {'type': 'bar'}]],
-            horizontal_spacing=0.15,
-        )
-
-        nombres_sorted = df_z.sort_values('VENTA_REAL', ascending=True)['NOMBRE'].tolist()
-        ventas_sorted = df_z[df_z['NOMBRE'].isin(nombres_sorted)]['VENTA_REAL'].tolist()
-        dn_sorted = df_z[df_z['NOMBRE'].isin(nombres_sorted)]['DN_REAL'].tolist()
-
-        fig_venta_dn.add_trace(
-            go.Bar(
-                y=nombres_sorted, x=ventas_sorted, orientation='h',
-                marker=dict(color='#3b82f6', opacity=0.8),
-                text=[f'${v:,.0f}' for v in ventas_sorted],
-                textposition='outside',
-                textfont=dict(size=9, color='#cbd5e1'),
-                hovertemplate='<b>%{y}</b><br>Venta: $%{x:,.0f}<extra></extra>',
-            ),
-            row=1, col=1
-        )
-
-        fig_venta_dn.add_trace(
-            go.Bar(
-                y=nombres_sorted, x=dn_sorted, orientation='h',
-                marker=dict(color='#10b981', opacity=0.8),
-                text=[f'{int(v)} clientes' for v in dn_sorted],
-                textposition='outside',
-                textfont=dict(size=9, color='#cbd5e1'),
-                hovertemplate='<b>%{y}</b><br>DN: %{x}<extra></extra>',
-            ),
-            row=1, col=2
-        )
-
-        fig_venta_dn.update_xaxes(gridcolor='#1e2536', color='#64748b', row=1, col=1)
-        fig_venta_dn.update_xaxes(gridcolor='#1e2536', color='#64748b', row=1, col=2)
-        fig_venta_dn.update_yaxes(color='#e2e8f0', showgrid=False, row=1, col=1)
-        fig_venta_dn.update_yaxes(color='#e2e8f0', showgrid=False, row=1, col=2)
-
-        fig_venta_dn.update_layout(
-            height=max(300, len(df_z) * 35 + 80),
-            paper_bgcolor='#0d1117',
-            plot_bgcolor='#0d1117',
-            font=dict(color='#cbd5e1', size=11),
-            showlegend=False,
-            margin=dict(t=40, b=20, l=140, r=100),
-        )
-
-        st.plotly_chart(fig_venta_dn, use_container_width=True)
-
-        # ──── ANÁLISIS DN POR MARCA EN ZONA ────
-        st.markdown(f'<h3 style="color:#cbd5e1; font-size:1rem; margin-top:2rem; margin-bottom:1rem; font-weight:600;">🏷️ Análisis DN por Marca — {zona}</h3>', unsafe_allow_html=True)
-
-        # Agrupar DN por marca en la zona
-        if not df_vd.empty:
-            df_vd_zona = df_vd[df_vd['KEY_PDV'].isin(df_z['KEY_PDV'])].copy()
-            hoy = datetime.now()
-            if 'Fecha' in df_vd_zona.columns:
-                df_vd_zona = df_vd_zona[(df_vd_zona['Fecha'].dt.year == hoy.year) & (df_vd_zona['Fecha'].dt.month == hoy.month)]
-
-            if not df_vd_zona.empty and 'Marca' in df_vd_zona.columns:
-                # DN por marca
-                dn_marca = df_vd_zona.groupby('Marca')['Cliente'].nunique().sort_values(ascending=False).head(10)
-
-                if not dn_marca.empty:
-                    fig_dn = go.Figure(go.Bar(
-                        x=dn_marca.values,
-                        y=dn_marca.index,
-                        orientation='h',
-                        marker=dict(color=['#34d399','#10b981','#059669','#047857','#065f46',
-                                          '#f59e0b','#d97706','#b45309','#92400e','#78350f'],
-                                   opacity=0.85),
-                        text=[f'{int(v)} clientes' for v in dn_marca.values],
-                        textposition='outside',
-                        textfont=dict(size=10, color='#cbd5e1'),
-                        hovertemplate='<b>%{y}</b><br>👥 Clientes: %{x}<extra></extra>',
-                    ))
-                    fig_dn.update_layout(
-                        height=350,
-                        title=dict(text=f'<b>Top Marcas por Clientes Nuevos — {zona}</b>',
-                                  font=dict(size=13, color='#f1f5f9')),
-                        paper_bgcolor='#0d1117',
-                        plot_bgcolor='#0d1117',
-                        font=dict(color='#cbd5e1'),
-                        xaxis=dict(gridcolor='#1e2536', color='#64748b'),
-                        yaxis=dict(color='#e2e8f0', showgrid=False),
-                        margin=dict(t=45, b=20, l=150, r=80),
-                    )
-                    st.plotly_chart(fig_dn, use_container_width=True)
-
         st.markdown('---')
 
+    # ── Detalle por vendedor ───────────────────────────────────────────────────
     st.markdown('<h2 class="section-title">🔍 Top Marcas por Vendedor</h2>', unsafe_allow_html=True)
     vend_opts = tabla[['KEY_PDV', 'NOMBRE', 'ZONA']].copy()
     vend_opts['label'] = vend_opts.apply(
@@ -1326,6 +1234,7 @@ def pagina_presupuesto_cumplimiento():
 
     st.markdown('---')
 
+    # ── Descarga PDF ───────────────────────────────────────────────────────────
     st.markdown('<h2 class="section-title">📄 Descargar Reporte</h2>', unsafe_allow_html=True)
     pdf_col1, pdf_col2 = st.columns([2, 1])
     with pdf_col1:
@@ -1348,6 +1257,7 @@ def pagina_presupuesto_cumplimiento():
 
     st.markdown('---')
 
+    # ── Envío Telegram ─────────────────────────────────────────────────────────
     st.markdown('<h2 class="section-title">📨 Enviar Reportes a Telegram</h2>', unsafe_allow_html=True)
     st.info(f'⏰ Hora actual: **{hoy.strftime("%H:%M")}**  •  Recomendado enviar a las **21:00**')
 
@@ -1382,6 +1292,7 @@ def pagina_presupuesto_cumplimiento():
 
     st.markdown('---')
 
+    # ── Actualizar datos ───────────────────────────────────────────────────────
     col_refresh1, col_refresh2, col_refresh3 = st.columns([1, 1, 2])
     with col_refresh1:
         if st.button('🔄 Actualizar datos', use_container_width=True, key='refresh_btn'):
@@ -1397,5 +1308,6 @@ def pagina_presupuesto_cumplimiento():
     )
 
 
+# ═════════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     pagina_presupuesto_cumplimiento()
