@@ -25,15 +25,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # ─── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 BASE_DIR         = Path(__file__).parent
 CREDS_PATH       = BASE_DIR / 'credenciales.json'
-TELEGRAM_TOKEN   = os.getenv('TELEGRAM_TOKEN', '')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
+TELEGRAM_TOKEN   = st.secrets.get('TELEGRAM_TOKEN', '')
+TELEGRAM_CHAT_ID = st.secrets.get('TELEGRAM_CHAT_ID', '')
 
 ZONA_COLOR = {'ORIENTE': '#FF6B35', 'SIERRA': '#1E88E5'}
 
