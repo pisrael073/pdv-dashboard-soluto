@@ -31,7 +31,20 @@ ZONA_COLOR = {'ORIENTE': '#FF6B35', 'SIERRA': '#1E88E5'}
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _gc():
-    return gspread.service_account(filename=str(CREDS_PATH))
+    try:
+        # Streamlit Cloud: usar secrets [google]
+        if "google" in st.secrets:
+            creds_dict = {k: st.secrets.google[k] for k in st.secrets.google}
+            return gspread.service_account(info=creds_dict)
+    except:
+        pass
+
+    # Local: usar archivo credenciales.json
+    try:
+        return gspread.service_account(filename=str(CREDS_PATH))
+    except:
+        st.error("❌ No se encontró credenciales: ni Secrets en Streamlit Cloud ni credenciales.json")
+        return None
 
 
 def _extraer_pdv(texto: str) -> str:
