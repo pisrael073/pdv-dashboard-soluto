@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 from pathlib import Path
+from google.oauth2.service_account import Credentials
 
 # ─── CONFIGURACIÓN ────────────────────────────────────────────────────────────
 BASE_DIR         = Path(__file__).parent
@@ -31,30 +32,20 @@ ZONA_COLOR = {'ORIENTE': '#FF6B35', 'SIERRA': '#1E88E5'}
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 def _gc():
-    # Debug: mostrar claves disponibles
-    st.write(f"🔍 Claves en st.secrets: {list(st.secrets.keys())}")
-
     try:
-        # Streamlit Cloud: intentar con sección [google]
+        # Streamlit Cloud: usar Secrets [google]
         if "google" in st.secrets:
-            st.write("✅ Encontré sección [google]")
             creds_dict = {k: st.secrets.google[k] for k in st.secrets.google}
-            return gspread.service_account(info=creds_dict)
-
-        # Si no hay [google], intentar acceder directo
-        if "type" in st.secrets:
-            st.write("✅ Encontré 'type' en raíz de secrets")
-            creds_dict = {k: st.secrets[k] for k in st.secrets}
-            return gspread.service_account(info=creds_dict)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/spreadsheets'])
+            return gspread.authorize(creds)
     except Exception as e:
-        st.write(f"⚠️ Error con Secrets: {e}")
+        pass
 
     # Local: usar archivo credenciales.json
     try:
-        st.write(f"📁 Intentando con archivo: {CREDS_PATH}")
         return gspread.service_account(filename=str(CREDS_PATH))
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        st.error("❌ No se encontró credenciales")
         return None
 
 
