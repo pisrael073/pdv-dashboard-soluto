@@ -1247,6 +1247,20 @@ def dashboard(df_v_all, df_p, usuario_row):
                     fig_tree.update_traces(textfont=dict(color='#FFFFFF', size=13), textinfo='label+value+percent root')
                     st.plotly_chart(fig_tree, use_container_width=True)
 
+                # ── Distribución DN ────────────────────────────────────────
+                st.markdown(f"<div class='section-title'>👥 Distribución de Clientes por {modo_analisis}</div>", unsafe_allow_html=True)
+                if 'Cliente' in df_a.columns:
+                    df_dn = df_a.groupby(dim_col)['Cliente'].nunique().reset_index().rename(columns={'Cliente': 'DN'}).sort_values('DN', ascending=False)
+                    if not df_dn.empty:
+                        fig_dn_tree = px.treemap(
+                            df_dn, path=[dim_col], values='DN',
+                            color=dim_col,
+                            color_discrete_sequence=['#1D4ED8','#065F46','#92400E','#6B21A8','#BE123C','#0E7490','#166534','#9A3412','#1E3A5F','#3B0764']
+                        )
+                        fig_dn_tree.update_layout(**_dark, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
+                        fig_dn_tree.update_traces(textfont=dict(color='#FFFFFF', size=13), textinfo='label+value+percent root')
+                        st.plotly_chart(fig_dn_tree, use_container_width=True)
+
                 # ── Tendencia ─────────────────────────────────────────────
                 if 'Fecha' in df_a.columns:
                     st.markdown(f"<div class='section-title'>📅 Tendencia diaria — Top 5 {modo_analisis}s</div>", unsafe_allow_html=True)
