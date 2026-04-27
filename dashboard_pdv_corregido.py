@@ -36,7 +36,7 @@ def _gc():
         # Streamlit Cloud: usar Secrets [google]
         if "google" in st.secrets:
             creds_dict = {k: st.secrets.google[k] for k in st.secrets.google}
-            creds = Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/spreadsheets'])
+            creds = Credentials.from_service_account_info(creds_dict)
             return gspread.authorize(creds)
     except Exception as e:
         pass
